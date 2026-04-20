@@ -1,4 +1,4 @@
-import type { CompressorParams } from './compressor-params';
+import { normalizeCompressorParams, type CompressorParams } from './compressor-params';
 
 export const USER_PRESET_ID_PREFIX = 'user_';
 
@@ -19,10 +19,20 @@ export const isUserPresetId = (id: string): id is UserPresetId =>
 export const generateUserPresetId = (): UserPresetId =>
   `${USER_PRESET_ID_PREFIX}${crypto.randomUUID()}`;
 
+type RawUserPreset = Omit<UserPreset, 'params'> & { params: Partial<CompressorParams> };
+
+const normalizeUserPreset = (preset: RawUserPreset): UserPreset => ({
+  id: preset.id,
+  name: preset.name,
+  createdAt: preset.createdAt,
+  params: normalizeCompressorParams(preset.params),
+});
+
 export const loadUserPresets = async (): Promise<UserPreset[]> => {
   const result = await chrome.storage.local.get(USER_PRESETS_STORAGE_KEY);
   const stored = result[USER_PRESETS_STORAGE_KEY];
-  return Array.isArray(stored) ? (stored as UserPreset[]) : [];
+  if (!Array.isArray(stored)) return [];
+  return (stored as RawUserPreset[]).map(normalizeUserPreset);
 };
 
 export const saveUserPresets = async (presets: readonly UserPreset[]): Promise<void> => {

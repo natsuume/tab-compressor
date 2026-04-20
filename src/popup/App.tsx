@@ -5,6 +5,7 @@ import type { UserPreset, UserPresetId } from '@/shared/user-presets';
 import { useCurrentTabId } from './hooks/useCurrentTabId';
 import { useTabState } from './hooks/useTabState';
 import { useMeterStream } from './hooks/useMeterStream';
+import { useMonitorTab } from './hooks/useMonitorTab';
 import { useUserPresets } from './hooks/useUserPresets';
 import { PowerToggle } from './components/PowerToggle';
 import { PresetSelector } from './components/PresetSelector';
@@ -18,6 +19,7 @@ export const App = () => {
   const { state, isReady, enable, disable, updateParams, setState } = useTabState(tabId);
   const meters = useMeterStream(tabId);
   const userPresets = useUserPresets();
+  useMonitorTab(tabId, state.params);
 
   const handleToggle = useCallback(() => {
     if (state.enabled) {
@@ -123,7 +125,7 @@ export const App = () => {
             <span className="section__heading">Levels</span>
             <LevelMeters values={meters} />
             {!state.enabled && (
-              <p className="info-text">ON にするとタブ音声を計測し、メーターが動き始めます。</p>
+              <p className="info-text">OFF 中は入力レベルのみ計測しています (コンプレッサー無効)。</p>
             )}
           </section>
         </div>

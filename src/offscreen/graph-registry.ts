@@ -4,6 +4,7 @@ import {
   buildConstraintsForTabStream,
   createAudioGraph,
   disposeGraph,
+  setGraphEnabled,
   type AudioGraph,
 } from './audio-graph';
 
@@ -19,37 +20,47 @@ const getAudioContext = (): AudioContext => {
   return audioContext;
 };
 
-export const setStreamForTab = async (
-  tabId: number,
-  streamId: string,
-  params: CompressorParams,
-): Promise<void> => {
-  if (entries.has(tabId)) {
-    removeTab(tabId);
-  }
-
+const captureStream = async (streamId: string): Promise<MediaStream> => {
   const constraints = buildConstraintsForTabStream(streamId);
   const stream = await navigator.mediaDevices.getUserMedia(
     constraints as MediaStreamConstraints,
   );
-
   const ctx = getAudioContext();
   if (ctx.state === 'suspended') {
     await ctx.resume();
   }
-  const graph = createAudioGraph(ctx, stream, params);
+  return stream;
+};
+
+export const setStreamForTab = async (
+  tabId: number,
+  streamId: string,
+  params: CompressorParams,
+  enabled: boolean,
+): Promise<void> => {
+  if (entries.has(tabId)) {
+    removeTab(tabId);
+  }
+  const stream = await captureStream(streamId);
+  const graph = createAudioGraph(getAudioContext(), stream, params, enabled);
   entries.set(tabId, { tabId, graph });
 };
 
 export const updateTabParams = (tabId: number, params: CompressorParams): void => {
   const entry = entries.get(tabId);
   if (entry === undefined) return;
-  applyParams(
-    entry.graph.compressor,
-    entry.graph.makeupGain,
-    params,
-    getAudioContext().currentTime,
-  );
+  applyParams(entry.graph, params, getAudioContext().currentTime);
+};
+
+export const setTabEnabled = (
+  tabId: number,
+  enabled: boolean,
+  params: CompressorParams,
+): boolean => {
+  const entry = entries.get(tabId);
+  if (entry === undefined) return false;
+  setGraphEnabled(entry.graph, enabled, params, getAudioContext().currentTime);
+  return true;
 };
 
 export const removeTab = (tabId: number): void => {
@@ -57,6 +68,14 @@ export const removeTab = (tabId: number): void => {
   if (entry === undefined) return;
   disposeGraph(entry.graph);
   entries.delete(tabId);
+};
+
+// popup が閉じた際、bypass モードのみのグラフを破棄する。enabled のグラフは保持。
+export const stopMonitoringTab = (tabId: number): void => {
+  const entry = entries.get(tabId);
+  if (entry === undefined) return;
+  if (entry.graph.enabled) return;
+  removeTab(tabId);
 };
 
 export const clearAll = (): void => {

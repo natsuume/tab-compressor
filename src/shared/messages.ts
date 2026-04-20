@@ -4,7 +4,10 @@ export type Msg =
   | { type: 'ENABLE_TAB'; tabId: number; params: CompressorParams }
   | { type: 'DISABLE_TAB'; tabId: number }
   | { type: 'UPDATE_PARAMS'; tabId: number; params: CompressorParams }
-  | { type: 'SET_STREAM'; tabId: number; streamId: string; params: CompressorParams }
+  | { type: 'SET_STREAM'; tabId: number; streamId: string; params: CompressorParams; enabled: boolean }
+  | { type: 'SET_ENABLED'; tabId: number; enabled: boolean; params: CompressorParams }
+  | { type: 'MONITOR_TAB'; tabId: number; params: CompressorParams }
+  | { type: 'STOP_MONITOR'; tabId: number }
   | { type: 'DESTROY_GRAPH'; tabId: number }
   | { type: 'PING_OFFSCREEN' };
 

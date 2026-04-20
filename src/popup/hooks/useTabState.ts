@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useState } from 'react';
 import type { Msg } from '@/shared/messages';
 import type { CompressorParams } from '@/shared/compressor-params';
-import { DEFAULT_PARAMS } from '@/shared/compressor-params';
+import { DEFAULT_PARAMS, normalizeCompressorParams } from '@/shared/compressor-params';
 import { DEFAULT_PRESET_ID } from '@/shared/presets';
 import { tabStorageKey, type TabState } from '@/shared/tab-state';
 
@@ -10,6 +10,11 @@ const createDefaultState = (): TabState => ({
   presetId: DEFAULT_PRESET_ID,
   params: DEFAULT_PARAMS,
 });
+
+const normalizeTabState = (raw: TabState | undefined): TabState => {
+  if (raw === undefined) return createDefaultState();
+  return { ...raw, params: normalizeCompressorParams(raw.params) };
+};
 
 const sendMessage = async (msg: Msg): Promise<{ ok: boolean; error?: string }> => {
   const response = (await chrome.runtime.sendMessage(msg)) as
@@ -39,7 +44,7 @@ export const useTabState = (tabId: number | null): UseTabStateResult => {
     chrome.storage.session.get(key).then((stored) => {
       if (cancelled) return;
       const loaded = stored[key] as TabState | undefined;
-      setStateLocal(loaded ?? createDefaultState());
+      setStateLocal(normalizeTabState(loaded));
       setIsReady(true);
     }).catch(() => {
       if (!cancelled) {
@@ -56,7 +61,7 @@ export const useTabState = (tabId: number | null): UseTabStateResult => {
       const change = changes[key];
       if (change === undefined) return;
       const newValue = change.newValue as TabState | undefined;
-      setStateLocal(newValue ?? createDefaultState());
+      setStateLocal(normalizeTabState(newValue));
     };
     chrome.storage.onChanged.addListener(onChanged);
 

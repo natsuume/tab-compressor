@@ -14,6 +14,7 @@ const PRECISION: Record<keyof CompressorParams, number> = {
   ratio: 1,
   attackMs: 0,
   releaseMs: 0,
+  manualMakeupGainDb: 1,
 };
 
 export const ParameterPanel = ({ params, disabled = false, onChange }: ParameterPanelProps) => {

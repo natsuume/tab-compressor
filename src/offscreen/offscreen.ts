@@ -1,5 +1,11 @@
 import { isMsg, OFFSCREEN_TARGET } from '@/shared/messages';
-import { removeTab, setStreamForTab, updateTabParams } from './graph-registry';
+import {
+  removeTab,
+  setStreamForTab,
+  setTabEnabled,
+  stopMonitoringTab,
+  updateTabParams,
+} from './graph-registry';
 import { startBroadcasting } from './meter-broadcaster';
 
 type TargetedEnvelope = { target?: unknown };
@@ -19,11 +25,17 @@ chrome.runtime.onMessage.addListener((raw, _sender, sendResponse) => {
     try {
       switch (raw.type) {
         case 'SET_STREAM':
-          await setStreamForTab(raw.tabId, raw.streamId, raw.params);
+          await setStreamForTab(raw.tabId, raw.streamId, raw.params, raw.enabled);
           startBroadcasting();
+          return { ok: true };
+        case 'SET_ENABLED':
+          setTabEnabled(raw.tabId, raw.enabled, raw.params);
           return { ok: true };
         case 'UPDATE_PARAMS':
           updateTabParams(raw.tabId, raw.params);
+          return { ok: true };
+        case 'STOP_MONITOR':
+          stopMonitoringTab(raw.tabId);
           return { ok: true };
         case 'DESTROY_GRAPH':
           removeTab(raw.tabId);
