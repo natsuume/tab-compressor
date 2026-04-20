@@ -1,10 +1,13 @@
 import type { CompressorParams } from './compressor-params';
 import type { PresetId } from './presets';
+import type { UserPresetId } from './user-presets';
 import { STORAGE_KEY_PREFIX } from './constants';
+
+export type ActivePresetRef = PresetId | UserPresetId | 'custom';
 
 export type TabState = {
   enabled: boolean;
-  presetId: PresetId | 'custom';
+  presetId: ActivePresetRef;
   params: CompressorParams;
 };
 

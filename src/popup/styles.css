@@ -105,6 +105,83 @@ h3 {
   background: #223a2c;
 }
 
+.user-preset-toolbar {
+  display: flex;
+}
+
+.save-preset-button {
+  width: 100%;
+  border: 1px dashed #3a3f45;
+  background: transparent;
+  color: #c2c7cd;
+  padding: 6px 8px;
+  border-radius: 4px;
+  font-size: 12px;
+  cursor: pointer;
+  transition: border-color 0.15s ease, color 0.15s ease;
+}
+
+.save-preset-button:hover {
+  border-color: #3fa066;
+  color: #e6e6e6;
+}
+
+.user-preset-list {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.user-preset-item {
+  display: grid;
+  grid-template-columns: 1fr auto;
+  align-items: stretch;
+  border: 1px solid #3a3f45;
+  border-radius: 4px;
+  overflow: hidden;
+  background: #1f2327;
+}
+
+.user-preset-item[data-active='true'] {
+  border-color: #3fa066;
+  background: #223a2c;
+}
+
+.user-preset-item__select {
+  border: none;
+  background: transparent;
+  color: inherit;
+  text-align: left;
+  padding: 6px 8px;
+  font-size: 12px;
+  cursor: pointer;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.user-preset-item__select:hover {
+  background: rgba(255, 255, 255, 0.04);
+}
+
+.user-preset-item__remove {
+  border: none;
+  border-left: 1px solid #3a3f45;
+  background: transparent;
+  color: #8c9299;
+  width: 26px;
+  cursor: pointer;
+  font-size: 14px;
+  line-height: 1;
+  padding: 0;
+}
+
+.user-preset-item__remove:hover {
+  background: #3d2323;
+  color: #e6a5a5;
+}
+
 .parameter-slider {
   display: grid;
   grid-template-columns: 72px 1fr 60px;

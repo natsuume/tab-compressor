@@ -19,8 +19,8 @@ export const PRESETS: readonly Preset[] = [
   {
     id: 'scream',
     name: '絶叫抑制(強)',
-    description: '突発的な絶叫を強く抑える。FPS実況・ホラー配信向け',
-    params: { threshold: -24, knee: 12, ratio: 10, attackMs: 3, releaseMs: 80 },
+    description: '突発的な絶叫をリミッター並に封じる。FPS実況・ホラー配信向け',
+    params: { threshold: -32, knee: 4, ratio: 20, attackMs: 1, releaseMs: 50 },
   },
   {
     id: 'broadcast',

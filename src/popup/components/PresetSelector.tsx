@@ -1,7 +1,7 @@
 import { PRESETS, type PresetId } from '@/shared/presets';
 
 type PresetSelectorProps = {
-  activeId: PresetId | 'custom';
+  activeId: string;
   onSelect: (id: PresetId) => void;
 };
 
