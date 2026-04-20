@@ -34,17 +34,26 @@ chrome.runtime.onMessage.addListener((raw, _sender, sendResponse) => {
     try {
       switch (raw.type) {
         case 'ENABLE_TAB': {
-          const state: TabState = {
+          const key = tabStorageKey(raw.tabId);
+          const stored = await chrome.storage.session.get(key);
+          const prev = stored[key] as TabState | undefined;
+          const next: TabState = {
             enabled: true,
-            presetId: DEFAULT_PRESET_ID,
+            presetId: prev?.presetId ?? DEFAULT_PRESET_ID,
             params: raw.params,
           };
-          await chrome.storage.session.set({ [tabStorageKey(raw.tabId)]: state });
-          await enableTab(raw.tabId, state);
+          await chrome.storage.session.set({ [key]: next });
+          await enableTab(raw.tabId, next);
           return { ok: true };
         }
         case 'DISABLE_TAB': {
-          await chrome.storage.session.remove(tabStorageKey(raw.tabId));
+          const key = tabStorageKey(raw.tabId);
+          const stored = await chrome.storage.session.get(key);
+          const prev = stored[key] as TabState | undefined;
+          if (prev !== undefined) {
+            const next: TabState = { ...prev, enabled: false };
+            await chrome.storage.session.set({ [key]: next });
+          }
           await disableTab(raw.tabId);
           return { ok: true };
         }

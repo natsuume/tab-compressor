@@ -8,6 +8,7 @@ type ParameterSliderProps = {
   step: number;
   unit: string;
   precision?: number;
+  disabled?: boolean;
   onChange: (value: number) => void;
 };
 
@@ -24,6 +25,7 @@ export const ParameterSlider = ({
   step,
   unit,
   precision = 1,
+  disabled = false,
   onChange,
 }: ParameterSliderProps) => {
   const handleChange = (e: ChangeEvent<HTMLInputElement>): void => {
@@ -32,9 +34,17 @@ export const ParameterSlider = ({
   };
 
   return (
-    <label className="parameter-slider">
+    <label className="parameter-slider" data-disabled={disabled}>
       <span className="parameter-slider__label">{label}</span>
-      <input type="range" min={min} max={max} step={step} value={value} onChange={handleChange} />
+      <input
+        type="range"
+        min={min}
+        max={max}
+        step={step}
+        value={value}
+        disabled={disabled}
+        onChange={handleChange}
+      />
       <span className="parameter-slider__value">{formatValue(value, precision, unit)}</span>
     </label>
   );

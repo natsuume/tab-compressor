@@ -3,6 +3,7 @@ import type { UserPreset, UserPresetId } from '@/shared/user-presets';
 type UserPresetListProps = {
   presets: readonly UserPreset[];
   activeId: string;
+  disabled?: boolean;
   onSelect: (preset: UserPreset) => void;
   onRemove: (id: UserPresetId) => void;
   onSaveCurrent: () => void;
@@ -11,13 +12,19 @@ type UserPresetListProps = {
 export const UserPresetList = ({
   presets,
   activeId,
+  disabled = false,
   onSelect,
   onRemove,
   onSaveCurrent,
 }: UserPresetListProps) => (
   <>
     <div className="user-preset-toolbar">
-      <button type="button" className="save-preset-button" onClick={onSaveCurrent}>
+      <button
+        type="button"
+        className="save-preset-button"
+        disabled={disabled}
+        onClick={onSaveCurrent}
+      >
         + 現在の設定を保存
       </button>
     </div>
@@ -35,6 +42,7 @@ export const UserPresetList = ({
               type="button"
               className="user-preset-item__select"
               title={preset.name}
+              disabled={disabled}
               onClick={() => onSelect(preset)}
             >
               {preset.name}

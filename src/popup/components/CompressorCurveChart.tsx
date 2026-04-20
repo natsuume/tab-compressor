@@ -46,7 +46,7 @@ export const CompressorCurveChart = ({ params, inputDb }: CompressorCurveChartPr
             y1={PADDING.top}
             x2={dbToX(v)}
             y2={PADDING.top + PLOT_HEIGHT}
-            stroke="#2a2e33"
+            style={{ stroke: 'var(--color-chart-grid)' }}
             strokeWidth={1}
           />
           <line
@@ -54,13 +54,19 @@ export const CompressorCurveChart = ({ params, inputDb }: CompressorCurveChartPr
             y1={dbToY(v)}
             x2={PADDING.left + PLOT_WIDTH}
             y2={dbToY(v)}
-            stroke="#2a2e33"
+            style={{ stroke: 'var(--color-chart-grid)' }}
             strokeWidth={1}
           />
-          <text x={dbToX(v)} y={HEIGHT - 6} fill="#6e757c" fontSize="9" textAnchor="middle">
+          <text
+            x={dbToX(v)}
+            y={HEIGHT - 6}
+            style={{ fill: 'var(--color-chart-axis)' }}
+            fontSize="9"
+            textAnchor="middle"
+          >
             {v}
           </text>
-          <text x={6} y={dbToY(v) + 3} fill="#6e757c" fontSize="9">
+          <text x={6} y={dbToY(v) + 3} style={{ fill: 'var(--color-chart-axis)' }} fontSize="9">
             {v}
           </text>
         </g>
@@ -71,7 +77,7 @@ export const CompressorCurveChart = ({ params, inputDb }: CompressorCurveChartPr
         y1={dbToY(MIN_DB)}
         x2={dbToX(MAX_DB)}
         y2={dbToY(MAX_DB)}
-        stroke="#3a3f45"
+        style={{ stroke: 'var(--color-chart-diag)' }}
         strokeWidth={1}
         strokeDasharray="3 3"
       />
@@ -81,13 +87,18 @@ export const CompressorCurveChart = ({ params, inputDb }: CompressorCurveChartPr
         y1={PADDING.top}
         x2={thresholdX}
         y2={PADDING.top + PLOT_HEIGHT}
-        stroke="#dba13c"
+        style={{ stroke: 'var(--color-warn)' }}
         strokeWidth={1}
         strokeDasharray="2 3"
         opacity={0.7}
       />
 
-      <polyline fill="none" stroke="#3fa066" strokeWidth={2} points={polylinePoints} />
+      <polyline
+        fill="none"
+        style={{ stroke: 'var(--color-accent)' }}
+        strokeWidth={2}
+        points={polylinePoints}
+      />
 
       {inputMarkerX !== null && (
         <line
@@ -95,7 +106,7 @@ export const CompressorCurveChart = ({ params, inputDb }: CompressorCurveChartPr
           y1={PADDING.top}
           x2={inputMarkerX}
           y2={PADDING.top + PLOT_HEIGHT}
-          stroke="#d6dbe1"
+          style={{ stroke: 'var(--color-chart-marker)' }}
           strokeOpacity={0.3}
           strokeWidth={1}
         />

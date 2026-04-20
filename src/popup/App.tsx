@@ -74,6 +74,8 @@ export const App = () => {
     [state, setState, userPresets],
   );
 
+  const controlsDisabled = !state.enabled;
+
   return (
     <div className="app">
       <header className="app__header">
@@ -87,39 +89,56 @@ export const App = () => {
 
       {tabId === null && <p className="warning-text">アクティブなタブを取得できません。</p>}
 
-      <section className="section">
-        <span className="section__heading">Preset</span>
-        <PresetSelector activeId={state.presetId} onSelect={handleBuiltinPresetSelect} />
-      </section>
+      <div className="app__presets">
+        <section className="section">
+          <span className="section__heading">Preset</span>
+          <PresetSelector
+            activeId={state.presetId}
+            disabled={controlsDisabled}
+            onSelect={handleBuiltinPresetSelect}
+          />
+        </section>
 
-      <section className="section">
-        <span className="section__heading">My Presets</span>
-        <UserPresetList
-          presets={userPresets.presets}
-          activeId={state.presetId}
-          onSelect={handleUserPresetSelect}
-          onRemove={handleUserPresetRemove}
-          onSaveCurrent={handleSaveCurrent}
-        />
-      </section>
+        <section className="section">
+          <span className="section__heading">My Presets</span>
+          <UserPresetList
+            presets={userPresets.presets}
+            activeId={state.presetId}
+            disabled={controlsDisabled}
+            onSelect={handleUserPresetSelect}
+            onRemove={handleUserPresetRemove}
+            onSaveCurrent={handleSaveCurrent}
+          />
+        </section>
+      </div>
 
-      <section className="section">
-        <span className="section__heading">Parameters</span>
-        <ParameterPanel params={state.params} onChange={handleParamsChange} />
-      </section>
+      <div className="app__body">
+        <div className="app__visual">
+          <section className="section">
+            <span className="section__heading">Curve</span>
+            <CompressorCurveChart params={state.params} inputDb={meters.inRmsDb} />
+          </section>
 
-      <section className="section">
-        <span className="section__heading">Curve</span>
-        <CompressorCurveChart params={state.params} inputDb={meters.inRmsDb} />
-      </section>
+          <section className="section">
+            <span className="section__heading">Levels</span>
+            <LevelMeters values={meters} />
+            {!state.enabled && (
+              <p className="info-text">ON にするとタブ音声を計測し、メーターが動き始めます。</p>
+            )}
+          </section>
+        </div>
 
-      <section className="section">
-        <span className="section__heading">Levels</span>
-        <LevelMeters values={meters} />
-        {!state.enabled && (
-          <p className="info-text">ON にするとタブ音声を計測し、メーターが動き始めます。</p>
-        )}
-      </section>
+        <div className="app__settings">
+          <section className="section">
+            <span className="section__heading">Parameters</span>
+            <ParameterPanel
+              params={state.params}
+              disabled={controlsDisabled}
+              onChange={handleParamsChange}
+            />
+          </section>
+        </div>
+      </div>
     </div>
   );
 };
