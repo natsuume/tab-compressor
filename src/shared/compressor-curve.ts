@@ -36,3 +36,15 @@ export const generateCurvePoints = (
   }
   return points;
 };
+
+// Chrome の DynamicsCompressorNode は内部で 0 dBFS 基準の自動メイクアップゲインを適用する。
+// 実装上の経験則: master_linear_gain ≈ pow(10, 0.6 * compression_at_0dBFS / 20)。
+// これを打ち消すための補正 dB 値（負値）を返すことで、threshold 以下の信号を素通しに近づける。
+const CHROME_MAKEUP_EMPIRICAL_FACTOR = 0.6;
+
+export const estimateAutoMakeupCompensationDb = (params: CompressorParams): number => {
+  const { threshold, ratio } = params;
+  if (ratio <= 1) return 0;
+  const compressionAt0dBFS = -threshold * (1 - 1 / ratio);
+  return -CHROME_MAKEUP_EMPIRICAL_FACTOR * compressionAt0dBFS;
+};

@@ -44,7 +44,12 @@ export const setStreamForTab = async (
 export const updateTabParams = (tabId: number, params: CompressorParams): void => {
   const entry = entries.get(tabId);
   if (entry === undefined) return;
-  applyParams(entry.graph.compressor, params, getAudioContext().currentTime);
+  applyParams(
+    entry.graph.compressor,
+    entry.graph.makeupGain,
+    params,
+    getAudioContext().currentTime,
+  );
 };
 
 export const removeTab = (tabId: number): void => {
