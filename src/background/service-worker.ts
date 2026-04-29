@@ -1,4 +1,9 @@
-import { isMsg, OFFSCREEN_TARGET, type Msg } from '@/shared/messages';
+import {
+  isMsg,
+  OFFSCREEN_NO_GRAPH_ERROR,
+  OFFSCREEN_TARGET,
+  type Msg,
+} from '@/shared/messages';
 import { tabStorageKey, type TabState } from '@/shared/tab-state';
 import {
   DEFAULT_PARAMS,
@@ -111,9 +116,31 @@ const syncMonitoredTabsIfStale = async (): Promise<void> => {
   if (!(await chrome.offscreen.hasDocument())) await resetMonitoredTabs();
 };
 
+type OffscreenResponse = { ok: boolean; error?: string };
+
+const isOffscreenResponse = (value: unknown): value is OffscreenResponse =>
+  typeof value === 'object' && value !== null && 'ok' in value;
+
+// Offscreen が「指定 tabId のグラフが存在しない」と返してきた状況を表す型付きエラー。
+// transport 失敗等の他の例外と区別して、cache 不整合の修復に限定して扱うために使う。
+class OffscreenNoGraphError extends Error {
+  constructor(msgType: string) {
+    super(`offscreen ${msgType} failed: ${OFFSCREEN_NO_GRAPH_ERROR}`);
+    this.name = 'OffscreenNoGraphError';
+  }
+}
+
+// Offscreen 側の getUserMedia 失敗や missing graph 等を呼び出し側に伝播させるため、
+// response を検証する。silent ok 扱いにすると monitoredTabs と実グラフの不整合を生む。
 const sendToOffscreen = async (msg: Msg): Promise<void> => {
   await ensureOffscreenAndSync();
-  await chrome.runtime.sendMessage({ ...msg, target: OFFSCREEN_TARGET });
+  const raw: unknown = await chrome.runtime.sendMessage({ ...msg, target: OFFSCREEN_TARGET });
+  if (isOffscreenResponse(raw) && raw.ok) return;
+  const reason = isOffscreenResponse(raw) ? raw.error ?? 'unknown error' : 'no response';
+  if (reason === OFFSCREEN_NO_GRAPH_ERROR) {
+    throw new OffscreenNoGraphError(msg.type);
+  }
+  throw new Error(`offscreen ${msg.type} failed: ${reason}`);
 };
 
 const loadTabState = async (tabId: number): Promise<TabState | undefined> => {
@@ -127,20 +154,40 @@ const saveTabState = async (tabId: number, state: TabState): Promise<void> => {
 };
 
 // 既存グラフがあれば経路切替のみ、なければタブキャプチャから構築。
-// 同一 tabId 並行は withTabLock で防がれる前提なので、ここでは has → add の
-// 単純な並びでよい (TOCTOU は外側ロックで排他されている)。
+// 同一 tabId 並行は withTabLock で防がれる前提。SET_ENABLED が "no graph" で
+// 失敗した場合 (cache と実グラフの不整合) のみ cache を捨てて attach 経路にフォールバック。
+// transport エラー等は素直に伝播させ、勝手にグラフを作り直さない。
 const attachOrToggleGraph = async (
   tabId: number,
   params: CompressorParams,
   enabled: boolean,
 ): Promise<void> => {
   if (await isMonitoredTab(tabId)) {
-    await sendToOffscreen({ type: 'SET_ENABLED', tabId, enabled, params });
-    return;
+    try {
+      await sendToOffscreen({ type: 'SET_ENABLED', tabId, enabled, params });
+      return;
+    } catch (err) {
+      if (!(err instanceof OffscreenNoGraphError)) throw err;
+      await removeMonitoredTab(tabId);
+    }
   }
   const streamId = await getTabMediaStreamId(tabId);
   await sendToOffscreen({ type: 'SET_STREAM', tabId, streamId, params, enabled });
   await addMonitoredTab(tabId);
+};
+
+// SET_ENABLED / UPDATE_PARAMS が "no graph" で失敗した場合のみ cache 不整合を解消する。
+// transport 等の他のエラーで cache を消すと、生きているグラフを孤立させてしまう。
+const sendOrCleanupOnMissingGraph = async (
+  tabId: number,
+  msg: Msg,
+): Promise<void> => {
+  try {
+    await sendToOffscreen(msg);
+  } catch (err) {
+    if (!(err instanceof OffscreenNoGraphError)) throw err;
+    await removeMonitoredTab(tabId);
+  }
 };
 
 chrome.runtime.onMessage.addListener((raw, _sender, sendResponse) => {
@@ -159,14 +206,16 @@ chrome.runtime.onMessage.addListener((raw, _sender, sendResponse) => {
       return await withTabLock(raw.tabId, async () => {
         switch (raw.type) {
           case 'ENABLE_TAB': {
+            // attach が成功してから storage を更新する (失敗時に UI=ON / 圧縮なし
+            // の不整合を起こさないため)。
             const prev = await loadTabState(raw.tabId);
+            await attachOrToggleGraph(raw.tabId, raw.params, true);
             const next: TabState = {
               enabled: true,
               presetId: prev?.presetId ?? DEFAULT_PRESET_ID,
               params: raw.params,
             };
             await saveTabState(raw.tabId, next);
-            await attachOrToggleGraph(raw.tabId, raw.params, true);
             return { ok: true };
           }
           case 'DISABLE_TAB': {
@@ -176,7 +225,7 @@ chrome.runtime.onMessage.addListener((raw, _sender, sendResponse) => {
             }
             const params = prev?.params ?? DEFAULT_PARAMS;
             if (await isMonitoredTab(raw.tabId)) {
-              await sendToOffscreen({
+              await sendOrCleanupOnMissingGraph(raw.tabId, {
                 type: 'SET_ENABLED',
                 tabId: raw.tabId,
                 enabled: false,
@@ -195,7 +244,7 @@ chrome.runtime.onMessage.addListener((raw, _sender, sendResponse) => {
             await saveTabState(raw.tabId, next);
             if (await isMonitoredTab(raw.tabId)) {
               // enabled/bypass どちらでも makeupGain に manualMakeupGainDb が反映される。
-              await sendToOffscreen({
+              await sendOrCleanupOnMissingGraph(raw.tabId, {
                 type: 'UPDATE_PARAMS',
                 tabId: raw.tabId,
                 params: raw.params,
@@ -220,7 +269,13 @@ chrome.runtime.onMessage.addListener((raw, _sender, sendResponse) => {
               // enabled の間は popup を閉じてもグラフは維持する。
               return { ok: true };
             }
-            await sendToOffscreen({ type: 'STOP_MONITOR', tabId: raw.tabId });
+            // STOP_MONITOR は no-op 化された応答も返らないが、no-graph 応答だった
+            // ケースだけ握りつぶす (transport エラーは伝播させる)。
+            try {
+              await sendToOffscreen({ type: 'STOP_MONITOR', tabId: raw.tabId });
+            } catch (err) {
+              if (!(err instanceof OffscreenNoGraphError)) throw err;
+            }
             await removeMonitoredTab(raw.tabId);
             return { ok: true };
           }

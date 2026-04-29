@@ -22,4 +22,8 @@ export const isMsg = (value: unknown): value is Msg => {
 export const OFFSCREEN_TARGET = 'offscreen' as const;
 export const BACKGROUND_TARGET = 'background' as const;
 
+// Offscreen が「指定 tabId のグラフが存在しない」状態を示すために返す error 文字列。
+// SW 側はこの値で missing-graph を識別し、cache 不整合の修復に限定して扱う。
+export const OFFSCREEN_NO_GRAPH_ERROR = 'no graph for tab' as const;
+
 export type TargetedMsg = Msg & { target: typeof OFFSCREEN_TARGET | typeof BACKGROUND_TARGET };
