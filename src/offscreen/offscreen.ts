@@ -1,4 +1,4 @@
-import { isMsg, OFFSCREEN_TARGET } from '@/shared/messages';
+import { isMsg, OFFSCREEN_NO_GRAPH_ERROR, OFFSCREEN_TARGET } from '@/shared/messages';
 import {
   removeTab,
   setStreamForTab,
@@ -29,10 +29,14 @@ chrome.runtime.onMessage.addListener((raw, _sender, sendResponse) => {
           startBroadcasting();
           return { ok: true };
         case 'SET_ENABLED':
-          setTabEnabled(raw.tabId, raw.enabled, raw.params);
+          if (!setTabEnabled(raw.tabId, raw.enabled, raw.params)) {
+            return { ok: false, error: OFFSCREEN_NO_GRAPH_ERROR };
+          }
           return { ok: true };
         case 'UPDATE_PARAMS':
-          updateTabParams(raw.tabId, raw.params);
+          if (!updateTabParams(raw.tabId, raw.params)) {
+            return { ok: false, error: OFFSCREEN_NO_GRAPH_ERROR };
+          }
           return { ok: true };
         case 'STOP_MONITOR':
           stopMonitoringTab(raw.tabId);

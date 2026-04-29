@@ -46,10 +46,11 @@ export const setStreamForTab = async (
   entries.set(tabId, { tabId, graph });
 };
 
-export const updateTabParams = (tabId: number, params: CompressorParams): void => {
+export const updateTabParams = (tabId: number, params: CompressorParams): boolean => {
   const entry = entries.get(tabId);
-  if (entry === undefined) return;
+  if (entry === undefined) return false;
   applyParams(entry.graph, params, getAudioContext().currentTime);
+  return true;
 };
 
 export const setTabEnabled = (
