@@ -201,6 +201,31 @@ chrome.runtime.onMessage.addListener((raw, _sender, sendResponse) => {
       if (!('tabId' in raw)) {
         return { ok: false, error: `unhandled type: ${raw.type}` };
       }
+      // Offscreen から「track が ended して graph を捨てた」通知。
+      // enabled なタブは popup を閉じても圧縮を維持する設計なので、ここで自動再 attach する。
+      // disabled (bypass) モードは popup 側 GRAPH_LOST listener が再 MONITOR_TAB を送って
+      // 復旧するので、SW 側では何もしない。
+      //
+      // 注: ここで monitoredTabs を直接消さず attachOrToggleGraph のセルフヒーリングに任せる。
+      // popup の MONITOR_TAB が先着して新 graph を構築している可能性があり、先に消すと
+      // 新 graph が「監視外」のまま Offscreen に残るリーク (再 attach が失敗したケース) が起きうる。
+      // attachOrToggleGraph は「graph 有なら SET_ENABLED で再確認 → missing なら cache 破棄 +
+      // 新規 attach」の順で動くので、popup 先着ケースでも我々先着ケースでも整合する。
+      if (raw.type === 'GRAPH_LOST') {
+        await withTabLock(raw.tabId, async () => {
+          const prev = await loadTabState(raw.tabId);
+          if (prev?.enabled !== true) return;
+          try {
+            await attachOrToggleGraph(raw.tabId, prev.params, true);
+          } catch (err) {
+            // 再 attach は best-effort (cross-origin navigation 等で activeTab grant が
+            // 失効していると失敗しうる)。次の popup open 時の MONITOR_TAB で復旧するが、
+            // 想定外の失敗を見落とさないようログだけ残す。
+            console.warn('[tab-compressor] re-attach after GRAPH_LOST failed', err);
+          }
+        });
+        return { ok: true };
+      }
       // no-op で終わる可能性があるので Offscreen は作成しない。送信直前で必要なら作る。
       await syncMonitoredTabsIfStale();
       return await withTabLock(raw.tabId, async () => {
@@ -255,10 +280,11 @@ chrome.runtime.onMessage.addListener((raw, _sender, sendResponse) => {
           case 'MONITOR_TAB': {
             const prev = await loadTabState(raw.tabId);
             const params = normalizeCompressorParams(prev?.params ?? raw.params);
-            // enabled なのに Offscreen にグラフが無い (= 拡張リロード等) 場合は再構築する。
-            // それ以外の MONITOR_TAB は bypass モードでメーター計測を起こす。
-            if (await isMonitoredTab(raw.tabId)) return { ok: true };
             const enabled = prev?.enabled === true;
+            // attachOrToggleGraph は「graph があれば SET_ENABLED で再確認 → missing なら
+            // cache を破棄して新規 attach」というセルフヒーリングを持つ。
+            // GRAPH_LOST 通知が popup 側より遅れて届くケース (Offscreen → popup → SW の経路で
+            // MONITOR_TAB が先に SW へ届く) でも、ここで死んだ graph を検出して再キャプチャできる。
             await attachOrToggleGraph(raw.tabId, params, enabled);
             return { ok: true };
           }
