@@ -9,6 +9,7 @@ export type Msg =
   | { type: 'MONITOR_TAB'; tabId: number; params: CompressorParams }
   | { type: 'STOP_MONITOR'; tabId: number }
   | { type: 'DESTROY_GRAPH'; tabId: number }
+  | { type: 'GRAPH_LOST'; tabId: number }
   | { type: 'PING_OFFSCREEN' };
 
 export type MsgType = Msg['type'];
