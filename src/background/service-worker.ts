@@ -157,12 +157,18 @@ const saveTabState = async (tabId: number, state: TabState): Promise<void> => {
 // 同一 tabId 並行は withTabLock で防がれる前提。SET_ENABLED が "no graph" で
 // 失敗した場合 (cache と実グラフの不整合) のみ cache を捨てて attach 経路にフォールバック。
 // transport エラー等は素直に伝播させ、勝手にグラフを作り直さない。
+//
+// forceReplace=true を渡すと SET_ENABLED の self-heal を飛ばして必ず新 stream で graph を
+// 置き換える。ナビゲーション後のように「graph は live だが silent」な状態を強制リフレッシュ
+// する経路で使う。setStreamForTab が rollback-safe な順序を保証するため、新 stream の
+// 取得に失敗すれば old graph が残る。
 const attachOrToggleGraph = async (
   tabId: number,
   params: CompressorParams,
   enabled: boolean,
+  options: { forceReplace?: boolean } = {},
 ): Promise<void> => {
-  if (await isMonitoredTab(tabId)) {
+  if (!options.forceReplace && (await isMonitoredTab(tabId))) {
     try {
       await sendToOffscreen({ type: 'SET_ENABLED', tabId, enabled, params });
       return;
@@ -394,20 +400,18 @@ const handleTabNavigation = (
     const params = prev?.params ?? DEFAULT_PARAMS;
     const enabled = prev?.enabled === true;
     try {
-      const streamId = await getTabMediaStreamId(tabId);
-      await sendToOffscreen({ type: 'SET_STREAM', tabId, streamId, params, enabled });
-      // monitoredTabs には navigation 前から登録済みのはずだが、念のため idempotent に追加。
-      await addMonitoredTab(tabId);
+      await attachOrToggleGraph(tabId, params, enabled, { forceReplace: true });
       await updateDegradedFlag(tabId, false);
     } catch (err) {
       console.warn('[tab-compressor] navigation reattach failed (keeping old graph)', err);
       if (enabled) await updateDegradedFlag(tabId, true);
+      // 失敗時のみ popup へ通知し、popup が開いていれば再 MONITOR_TAB で復旧を試みる。
+      // 成功時は storage.onChanged が degraded clear を popup に届けるので冗長な
+      // GRAPH_LOST broadcast は不要。
+      void chrome.runtime
+        .sendMessage({ type: 'GRAPH_LOST', tabId })
+        .catch(() => undefined);
     }
-    // popup が開いていれば再 MONITOR_TAB が走るが、上で SET_STREAM 完了済みなら
-    // attachOrToggleGraph の SET_ENABLED 経路で no-op になり整合する。
-    void chrome.runtime
-      .sendMessage({ type: 'GRAPH_LOST', tabId })
-      .catch(() => undefined);
   });
 };
 
