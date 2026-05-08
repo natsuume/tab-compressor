@@ -190,18 +190,28 @@ const sendOrCleanupOnMissingGraph = async (
   }
 };
 
-// graph を best-effort で破棄する。Offscreen が無ければ作らずに no-op、graph が
-// 既に無ければ OffscreenNoGraphError を握りつぶす。transport 失敗は warn を残す。
-// ナビゲーション failure cleanup や onRemoved のような「graph が残っているか
-// 不確かな経路」で使う。
-const bestEffortDestroyGraph = async (tabId: number): Promise<void> => {
-  if (!(await chrome.offscreen.hasDocument())) return;
+// graph を破棄する。戻り値は「graph が確実に消えたか」。
+// - Offscreen 自体が無い: true (graph も論理的に存在しない)
+// - DESTROY_GRAPH 成功: true
+// - OffscreenNoGraphError: true (既に消えていた)
+// - その他 transport エラー: false (生存可能性が残るので呼び出し側で cache/state を
+//   触らない判断材料にする)
+const tryDestroyGraph = async (tabId: number): Promise<boolean> => {
+  if (!(await chrome.offscreen.hasDocument())) return true;
   try {
     await sendToOffscreen({ type: 'DESTROY_GRAPH', tabId });
+    return true;
   } catch (err) {
-    if (err instanceof OffscreenNoGraphError) return;
+    if (err instanceof OffscreenNoGraphError) return true;
     console.warn('[tab-compressor] DESTROY_GRAPH failed', err);
+    return false;
   }
+};
+
+// onRemoved 等の「graph が残っていても困らない、最後の cleanup」用途。
+// 戻り値を見ない fire-and-forget スタイル。
+const bestEffortDestroyGraph = async (tabId: number): Promise<void> => {
+  await tryDestroyGraph(tabId);
 };
 
 // navigation や Offscreen からの GRAPH_LOST 通知のように「graph を維持できなくなった」
@@ -210,8 +220,13 @@ const bestEffortDestroyGraph = async (tabId: number): Promise<void> => {
 // auto-OFF にする (graph 破棄 + monitoredTabs から除く + enabled=true なら enabled=false
 // に降格)。popup を開けば storage.onChanged で OFF UI に切り替わり、ユーザーが再度 ON を
 // 押せば activeTab grant が付与されて確実に attach できる。
+//
+// graph 破棄が transport エラーで失敗した場合は graph 生存の可能性があるため cache や
+// storage を触らない (orphan graph + UI=OFF の不整合を防ぐ)。次の navigation や popup
+// 操作で再試行される。
 const demoteToOffAndCleanup = async (tabId: number): Promise<void> => {
-  await bestEffortDestroyGraph(tabId);
+  const destroyed = await tryDestroyGraph(tabId);
+  if (!destroyed) return;
   await removeMonitoredTab(tabId);
   const prev = await loadTabState(tabId);
   if (prev !== undefined && prev.enabled) {
