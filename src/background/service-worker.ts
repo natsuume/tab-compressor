@@ -231,14 +231,16 @@ chrome.runtime.onMessage.addListener((raw, _sender, sendResponse) => {
         return { ok: false, error: `unhandled type: ${raw.type}` };
       }
       // Offscreen から「track が ended して graph を捨てた」通知。
-      // 一律で auto-OFF (enabled=false に降格 + cache 整理) にする。popup の
-      // useMonitorTab はこの通知を listen しないので、ENABLE_TAB と並行 GRAPH_LOST
-      // の race は popup 経路には存在しない。ENABLE_TAB は withTabLock 経由で
-      // 直列化されるため、後着の demote が新規 ON を破壊することはあるが、それは
-      // 「graph lost したタイミングで偶然 ON 押下が同時発生した」極稀ケースで
-      // 仕様通り (lost イベントが新規 attach 時刻より後に処理されるなら destroy が正)。
+      // navigation 起因の graph 破棄は handleTabNavigation が先行して実行し、その
+      // bestEffortDestroyGraph で entries から削除されるため、後続の `track.ended`
+      // で graph-registry の handleEnded が `entries.get(tabId)?.graph !== graph`
+      // で早期 return する → このルートには到達しない。
+      // よって GRAPH_LOST が SW に届くのは「動画停止やデバイス切断等で track が
+      // 自然に ended した」navigation 以外のケース。ユーザーが再生再開すれば次の
+      // MONITOR_TAB / ENABLE_TAB で attachOrToggleGraph のセルフヒーリング
+      // (SET_ENABLED → no-graph → SET_STREAM フォールバック) が再 attach する。
+      // SW 側では何もしないことで popup の並行通信との race を構造的に回避する。
       if (raw.type === 'GRAPH_LOST') {
-        await withTabLock(raw.tabId, () => demoteToOffAndCleanup(raw.tabId));
         return { ok: true };
       }
       // no-op で終わる可能性があるので Offscreen は作成しない。送信直前で必要なら作る。
