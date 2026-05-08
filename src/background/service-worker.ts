@@ -234,8 +234,31 @@ chrome.runtime.onMessage.addListener((raw, _sender, sendResponse) => {
       // popup を閉じている間は activeTab grant が無く再 attach 不可なため、
       // 一律で auto-OFF (enabled=false に降格) にする。popup を開いてユーザーが
       // 再度 ON を押せば確実に attach できる。
+      //
+      // ただし lock 取得を待つ間に別経路 (ENABLE_TAB 等) で graph が再構築された
+      // 場合、stale な GRAPH_LOST で新 graph を壊さないよう probe で生存確認する。
+      // SET_ENABLED は graph 生存中なら現在値で送れば実質 no-op、無ければ
+      // OffscreenNoGraphError を返すので破壊せずに有無を区別できる。
       if (raw.type === 'GRAPH_LOST') {
-        await withTabLock(raw.tabId, () => demoteToOffAndCleanup(raw.tabId));
+        await withTabLock(raw.tabId, async () => {
+          const prev = await loadTabState(raw.tabId);
+          if (prev !== undefined && (await chrome.offscreen.hasDocument())) {
+            try {
+              await sendToOffscreen({
+                type: 'SET_ENABLED',
+                tabId: raw.tabId,
+                enabled: prev.enabled,
+                params: prev.params,
+              });
+              // graph 存在 → stale GRAPH_LOST。何もしない。
+              return;
+            } catch (err) {
+              if (!(err instanceof OffscreenNoGraphError)) throw err;
+              // 想定通り graph 無し。demote へ進む。
+            }
+          }
+          await demoteToOffAndCleanup(raw.tabId);
+        });
         return { ok: true };
       }
       // no-op で終わる可能性があるので Offscreen は作成しない。送信直前で必要なら作る。
