@@ -59,6 +59,11 @@ export const setStreamForTab = async (
   params: CompressorParams,
   enabled: boolean,
 ): Promise<void> => {
+  // Chrome の tabCapture は同一タブの同時キャプチャを許さない (`getUserMedia` が失敗する)。
+  // そのため acquire-first の rollback-safe 順序は採れず、先に old graph を破棄して
+  // tabCapture を release してから new stream を取得する必要がある。
+  // captureStream が失敗した場合は old が失われるが、呼び出し側 (SW) で monitoredTabs
+  // cache を整理し、popup が次に開いた MONITOR_TAB で復旧する経路に乗せる。
   if (entries.has(tabId)) {
     removeTab(tabId);
   }

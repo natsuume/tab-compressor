@@ -90,6 +90,11 @@ export const App = () => {
       </header>
 
       {tabId === null && <p className="warning-text">アクティブなタブを取得できません。</p>}
+      {state.degraded === true && (
+        <p className="warning-text">
+          ページ遷移で音声を取り直せませんでした。タブを操作 (再生/一時停止など) してから popup を開き直すと再開します。
+        </p>
+      )}
 
       <div className="app__presets">
         <section className="section">

@@ -15,7 +15,7 @@ export default defineManifest({
     service_worker: 'src/background/service-worker.ts',
     type: 'module',
   },
-  permissions: ['tabCapture', 'offscreen', 'storage', 'activeTab'],
+  permissions: ['tabCapture', 'offscreen', 'storage', 'activeTab', 'webNavigation'],
   web_accessible_resources: [
     {
       resources: ['src/offscreen/offscreen.html'],
