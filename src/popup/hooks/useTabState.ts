@@ -92,9 +92,17 @@ export const useTabState = (tabId: number | null): UseTabStateResult => {
   const setState = useCallback(
     async (next: TabState) => {
       if (tabId === null) return;
-      await chrome.storage.session.set({ [tabStorageKey(tabId)]: next });
-      if (next.enabled) {
-        await sendMessage({ type: 'UPDATE_PARAMS', tabId, params: next.params });
+      const key = tabStorageKey(tabId);
+      // popup から enabled を勝手に書き換えない: storage の最新 enabled で merge する。
+      // SW の auto-OFF (navigation で enabled=false に降格) と popup スライダー操作が
+      // 並行発生したときに、popup 側の古い state.enabled=true で書き戻して降格を
+      // resurrect しないため。enabled の変更は ENABLE_TAB / DISABLE_TAB だけが行う。
+      const stored = await chrome.storage.session.get(key);
+      const currentEnabled = (stored[key] as TabState | undefined)?.enabled ?? false;
+      const merged: TabState = { ...next, enabled: currentEnabled };
+      await chrome.storage.session.set({ [key]: merged });
+      if (currentEnabled) {
+        await sendMessage({ type: 'UPDATE_PARAMS', tabId, params: merged.params });
       }
     },
     [tabId],
