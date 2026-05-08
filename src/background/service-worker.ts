@@ -343,9 +343,21 @@ const handleTabNavigation = (
 ): void => {
   if (details.frameId !== 0) return;
   // Hot path 早期 return: webNavigation は全タブ全フレームで頻繁に発火する。
-  // cache が初期化済みかつ非対象タブなら withTabLock も async chain も取らずに抜ける。
-  // cache 未初期化 (SW 起動直後) はすり抜けて lock 内で確定判定する。
-  if (monitoredTabsCache !== null && !monitoredTabsCache.has(details.tabId)) return;
+  // cache が初期化済みかつ非対象タブで、in-flight な per-tab 操作も無いなら
+  // withTabLock も async chain も取らずに抜ける。
+  // - cache 未初期化 (SW 起動直後) はすり抜けて lock 内で確定判定する。
+  // - tabLocks に entry がある場合 (例: MONITOR_TAB の attach が進行中で
+  //   addMonitoredTab がまだ反映前) は cache を信用できないため、lock を
+  //   取って attach 完了後の cache で判定し直す。これがないと「attach 完了直前に
+  //   navigation が発火 → fast-path で skip → 新 graph が pre-navigation stream で
+  //   構築されたまま生き残る」レースで取りこぼす。
+  if (
+    monitoredTabsCache !== null
+    && !monitoredTabsCache.has(details.tabId)
+    && !tabLocks.has(details.tabId)
+  ) {
+    return;
+  }
   const { tabId } = details;
   void withTabLock(tabId, async () => {
     if (!(await isMonitoredTab(tabId))) return;
