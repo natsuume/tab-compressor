@@ -355,15 +355,18 @@ chrome.runtime.onMessage.addListener((raw, _sender, sendResponse) => {
 });
 
 // タブ内ナビゲーション (フル page navigation, history.pushState 等の SPA) を能動検知し、
-// 現グラフを完全破棄する。MediaStreamTrack の `ended` イベントは
+// 現グラフを新しい tabCapture stream で置き換える。MediaStreamTrack の `ended` イベントは
 // 「fully reload で track が live のまま silent 化」「pushState で document はそのまま」
-// 等のケースで発火しないため、`ended` 起点の検知では取りこぼす。graph が残ったままだと
+// 等のケースで発火しないため、`ended` 起点の検知では取りこぼす。graph を放置すると
 // `tabCapture` が拡張機能に専有された状態が続き、他のオーディオ系拡張も動かなくなる。
 //
-// 破棄後の復旧は既存経路に委ねる:
-// - popup が開いていれば GRAPH_LOST broadcast → popup の useMonitorTab listener が再 MONITOR_TAB
-// - popup が閉じていて enabled=true のときは SW 内の best-effort 再 attach (activeTab が
-//   失効していると失敗する。次回の popup open で MONITOR_TAB から復旧)
+// 「先に DESTROY_GRAPH → 後で再 attach」の順だと、再 attach 失敗 (cross-origin で
+// activeTab grant が失効した等) に working graph を完全に失う。代わりに rollback-safe な
+// 順番で:
+//   1. getTabMediaStreamId で新 stream を確保
+//   2. SET_STREAM で Offscreen 側 setStreamForTab に置換させる (内部で「new stream
+//      取得成功 → old graph 破棄 → 新 graph 構築」の順を保証している)
+//   3. 失敗時は old graph をそのまま残し、enabled なら degraded フラグだけ立てて popup に通知
 const handleTabNavigation = (
   details: chrome.webNavigation.WebNavigationFramedCallbackDetails,
 ): void => {
@@ -387,23 +390,24 @@ const handleTabNavigation = (
   const { tabId } = details;
   void withTabLock(tabId, async () => {
     if (!(await isMonitoredTab(tabId))) return;
-    // hasDocument の事前チェックは意図的: Offscreen が消えている場合に
-    // sendToOffscreen → ensureOffscreenAndSync が「破棄のためだけ」に
-    // Offscreen を作り直してしまうのを防ぐ。
-    if (await chrome.offscreen.hasDocument()) {
-      try {
-        await sendToOffscreen({ type: 'DESTROY_GRAPH', tabId });
-      } catch {
-        // 既に graph が無ければ no-op で良い。transport エラーも cache 整理は続行する。
-      }
+    const prev = await loadTabState(tabId);
+    const params = prev?.params ?? DEFAULT_PARAMS;
+    const enabled = prev?.enabled === true;
+    try {
+      const streamId = await getTabMediaStreamId(tabId);
+      await sendToOffscreen({ type: 'SET_STREAM', tabId, streamId, params, enabled });
+      // monitoredTabs には navigation 前から登録済みのはずだが、念のため idempotent に追加。
+      await addMonitoredTab(tabId);
+      await updateDegradedFlag(tabId, false);
+    } catch (err) {
+      console.warn('[tab-compressor] navigation reattach failed (keeping old graph)', err);
+      if (enabled) await updateDegradedFlag(tabId, true);
     }
-    await removeMonitoredTab(tabId);
-    // popup と Offscreen にだけ届く (SW 自身は Chrome の sendMessage 仕様で受信しない)。
-    // 自前の再 attach 経路は下の tryReattachIfEnabled で直接実行する。
+    // popup が開いていれば再 MONITOR_TAB が走るが、上で SET_STREAM 完了済みなら
+    // attachOrToggleGraph の SET_ENABLED 経路で no-op になり整合する。
     void chrome.runtime
       .sendMessage({ type: 'GRAPH_LOST', tabId })
       .catch(() => undefined);
-    await tryReattachIfEnabled(tabId, 'navigation');
   });
 };
 

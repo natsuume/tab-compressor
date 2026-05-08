@@ -59,10 +59,15 @@ export const setStreamForTab = async (
   params: CompressorParams,
   enabled: boolean,
 ): Promise<void> => {
+  // 新 stream の確保が成功してから old graph を破棄する rollback-safe な順序にする。
+  // ナビゲーション後の置換等で captureStream が失敗した場合、old graph を破棄済みだと
+  // 「動いていたかもしれない graph が無くなり、新 graph も作れない」状態になり、
+  // tabCapture も中途半端に release されない。先に new stream を確保すれば
+  // 失敗時に old を残せる。
+  const stream = await captureStream(streamId);
   if (entries.has(tabId)) {
     removeTab(tabId);
   }
-  const stream = await captureStream(streamId);
   const graph = createAudioGraph(getAudioContext(), stream, params, enabled);
   entries.set(tabId, { tabId, graph });
   watchStreamLifecycle(tabId, graph);
