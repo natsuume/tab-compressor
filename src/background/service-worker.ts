@@ -321,9 +321,14 @@ chrome.runtime.onMessage.addListener((raw, _sender, sendResponse) => {
             // cache を破棄して新規 attach」というセルフヒーリングを持つ。
             // GRAPH_LOST 通知が popup 側より遅れて届くケース (Offscreen → popup → SW の経路で
             // MONITOR_TAB が先に SW へ届く) でも、ここで死んだ graph を検出して再キャプチャできる。
-            await attachOrToggleGraph(raw.tabId, params, enabled);
-            // popup を開いた契機で前回の degraded 状態 (ナビゲーション後の reattach 失敗等)
-            // から自動回復した場合に警告表示を消す。
+            //
+            // degraded=true で到達した場合は old graph が silent な可能性があるため
+            // forceReplace=true で必ず新 stream に置き換える。SET_ENABLED self-heal だけ
+            // 通すと silent graph をそのままに degraded フラグだけ false 化してしまい、
+            // popup の警告は消えるのに実体は復旧していない状態になる。
+            const forceReplace = prev?.degraded === true;
+            await attachOrToggleGraph(raw.tabId, params, enabled, { forceReplace });
+            // 上記 attach が成功した時点で degraded 状態は解消したので false に戻す。
             await updateDegradedFlag(raw.tabId, false);
             return { ok: true };
           }
@@ -366,13 +371,11 @@ chrome.runtime.onMessage.addListener((raw, _sender, sendResponse) => {
 // 等のケースで発火しないため、`ended` 起点の検知では取りこぼす。graph を放置すると
 // `tabCapture` が拡張機能に専有された状態が続き、他のオーディオ系拡張も動かなくなる。
 //
-// 「先に DESTROY_GRAPH → 後で再 attach」の順だと、再 attach 失敗 (cross-origin で
-// activeTab grant が失効した等) に working graph を完全に失う。代わりに rollback-safe な
-// 順番で:
-//   1. getTabMediaStreamId で新 stream を確保
-//   2. SET_STREAM で Offscreen 側 setStreamForTab に置換させる (内部で「new stream
-//      取得成功 → old graph 破棄 → 新 graph 構築」の順を保証している)
-//   3. 失敗時は old graph をそのまま残し、enabled なら degraded フラグだけ立てて popup に通知
+// Chrome の tabCapture は同一タブの同時キャプチャを許さないので、setStreamForTab は
+// 「old graph を破棄 → 新 stream を取得」順で実行する。新 stream 取得に失敗 (cross-origin
+// で activeTab grant が失効した等) すると old は復元できないため、ここで monitoredTabs
+// cache も整理し、popup が次に開いた MONITOR_TAB で復旧する経路に確実に乗せる。
+// enabled タブで失敗した場合は degraded=true で popup に警告表示。
 const handleTabNavigation = (
   details: chrome.webNavigation.WebNavigationFramedCallbackDetails,
 ): void => {
@@ -403,11 +406,14 @@ const handleTabNavigation = (
       await attachOrToggleGraph(tabId, params, enabled, { forceReplace: true });
       await updateDegradedFlag(tabId, false);
     } catch (err) {
-      console.warn('[tab-compressor] navigation reattach failed (keeping old graph)', err);
+      console.warn('[tab-compressor] navigation reattach failed', err);
+      // setStreamForTab は old graph を先に破棄してから new stream を取りに行くため、
+      // 失敗時は Offscreen 側の entries は既に空になっている。SW 側 cache の整合性を
+      // 取るため monitoredTabs からも除く (次の MONITOR_TAB で SET_STREAM 経路に乗る)。
+      await removeMonitoredTab(tabId);
       if (enabled) await updateDegradedFlag(tabId, true);
-      // 失敗時のみ popup へ通知し、popup が開いていれば再 MONITOR_TAB で復旧を試みる。
-      // 成功時は storage.onChanged が degraded clear を popup に届けるので冗長な
-      // GRAPH_LOST broadcast は不要。
+      // popup が開いていれば再 MONITOR_TAB を送り、popup が閉じていれば storage の
+      // degraded フラグが popup の次の起動時に効く。
       void chrome.runtime
         .sendMessage({ type: 'GRAPH_LOST', tabId })
         .catch(() => undefined);

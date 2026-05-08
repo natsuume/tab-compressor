@@ -59,15 +59,15 @@ export const setStreamForTab = async (
   params: CompressorParams,
   enabled: boolean,
 ): Promise<void> => {
-  // 新 stream の確保が成功してから old graph を破棄する rollback-safe な順序にする。
-  // ナビゲーション後の置換等で captureStream が失敗した場合、old graph を破棄済みだと
-  // 「動いていたかもしれない graph が無くなり、新 graph も作れない」状態になり、
-  // tabCapture も中途半端に release されない。先に new stream を確保すれば
-  // 失敗時に old を残せる。
-  const stream = await captureStream(streamId);
+  // Chrome の tabCapture は同一タブの同時キャプチャを許さない (`getUserMedia` が失敗する)。
+  // そのため acquire-first の rollback-safe 順序は採れず、先に old graph を破棄して
+  // tabCapture を release してから new stream を取得する必要がある。
+  // captureStream が失敗した場合は old が失われるが、呼び出し側 (SW) で monitoredTabs
+  // cache を整理し、popup が次に開いた MONITOR_TAB で復旧する経路に乗せる。
   if (entries.has(tabId)) {
     removeTab(tabId);
   }
+  const stream = await captureStream(streamId);
   const graph = createAudioGraph(getAudioContext(), stream, params, enabled);
   entries.set(tabId, { tabId, graph });
   watchStreamLifecycle(tabId, graph);
