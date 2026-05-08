@@ -193,11 +193,14 @@ const sendOrCleanupOnMissingGraph = async (
 // degraded フラグを更新する。enabled=true なのに graph が無い「圧縮されているはずなのに
 // 素通し」状態を popup に明示するために使う。state が無い場合や値が変わらない場合は no-op
 // (storage.onChanged の不要発火を避ける)。
+// prev は呼び出し側で既に読んだ TabState を渡す (storage.session.get の二重発火回避)。
+// 呼び出し側は withTabLock で直列化された経路から呼び、prev と現在の storage が一致する
+// ことを前提にする。
 const updateDegradedFlag = async (
   tabId: number,
+  prev: TabState | undefined,
   degraded: boolean,
 ): Promise<void> => {
-  const prev = await loadTabState(tabId);
   if (prev === undefined) return;
   if ((prev.degraded ?? false) === degraded) return;
   await saveTabState(tabId, { ...prev, degraded });
@@ -222,10 +225,10 @@ const tryReattachIfEnabled = async (
   if (prev?.enabled !== true) return;
   try {
     await attachOrToggleGraph(tabId, prev.params, true);
-    await updateDegradedFlag(tabId, false);
+    await updateDegradedFlag(tabId, prev, false);
   } catch (err) {
     console.warn(`[tab-compressor] re-attach after ${cause} failed`, err);
-    await updateDegradedFlag(tabId, true);
+    await updateDegradedFlag(tabId, prev, true);
   }
 };
 
@@ -268,7 +271,9 @@ chrome.runtime.onMessage.addListener((raw, _sender, sendResponse) => {
           case 'DISABLE_TAB': {
             const prev = await loadTabState(raw.tabId);
             if (prev !== undefined) {
-              await saveTabState(raw.tabId, { ...prev, enabled: false });
+              // enabled=false の間は「graph が無くても圧縮しない」が正なので degraded は無効。
+              // 残しておくと OFF 表示と矛盾する警告が popup に出続ける。
+              await saveTabState(raw.tabId, { ...prev, enabled: false, degraded: false });
             }
             const params = prev?.params ?? DEFAULT_PARAMS;
             if (await isMonitoredTab(raw.tabId)) {
@@ -310,7 +315,7 @@ chrome.runtime.onMessage.addListener((raw, _sender, sendResponse) => {
             await attachOrToggleGraph(raw.tabId, params, enabled);
             // popup を開いた契機で前回の degraded 状態 (ナビゲーション後の reattach 失敗等)
             // から自動回復した場合に警告表示を消す。
-            await updateDegradedFlag(raw.tabId, false);
+            await updateDegradedFlag(raw.tabId, prev, false);
             return { ok: true };
           }
           case 'STOP_MONITOR': {
