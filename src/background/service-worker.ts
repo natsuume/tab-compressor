@@ -193,17 +193,20 @@ const sendOrCleanupOnMissingGraph = async (
 // degraded フラグを更新する。enabled=true なのに graph が無い「圧縮されているはずなのに
 // 素通し」状態を popup に明示するために使う。state が無い場合や値が変わらない場合は no-op
 // (storage.onChanged の不要発火を避ける)。
-// prev は呼び出し側で既に読んだ TabState を渡す (storage.session.get の二重発火回避)。
-// 呼び出し側は withTabLock で直列化された経路から呼び、prev と現在の storage が一致する
-// ことを前提にする。
+//
+// 書き込み直前に loadTabState を再実行するのが重要: popup の useTabState.setState は SW を
+// 経由せず直接 chrome.storage.session.set で params/presetId を書き換える。SW 側で
+// attachOrToggleGraph を await している間 (tabCapture や Offscreen messaging で ms 単位)
+// に popup の書き込みが入る可能性があり、attach 前の snapshot を保存し直すと popup の
+// 最新変更を silently roll back してしまう。
 const updateDegradedFlag = async (
   tabId: number,
-  prev: TabState | undefined,
   degraded: boolean,
 ): Promise<void> => {
-  if (prev === undefined) return;
-  if ((prev.degraded ?? false) === degraded) return;
-  await saveTabState(tabId, { ...prev, degraded });
+  const current = await loadTabState(tabId);
+  if (current === undefined) return;
+  if ((current.degraded ?? false) === degraded) return;
+  await saveTabState(tabId, { ...current, degraded });
 };
 
 // GRAPH_LOST 通知やナビゲーション破棄後など、graph が消えた契機からの共通復旧経路。
@@ -225,10 +228,10 @@ const tryReattachIfEnabled = async (
   if (prev?.enabled !== true) return;
   try {
     await attachOrToggleGraph(tabId, prev.params, true);
-    await updateDegradedFlag(tabId, prev, false);
+    await updateDegradedFlag(tabId, false);
   } catch (err) {
     console.warn(`[tab-compressor] re-attach after ${cause} failed`, err);
-    await updateDegradedFlag(tabId, prev, true);
+    await updateDegradedFlag(tabId, true);
   }
 };
 
@@ -315,7 +318,7 @@ chrome.runtime.onMessage.addListener((raw, _sender, sendResponse) => {
             await attachOrToggleGraph(raw.tabId, params, enabled);
             // popup を開いた契機で前回の degraded 状態 (ナビゲーション後の reattach 失敗等)
             // から自動回復した場合に警告表示を消す。
-            await updateDegradedFlag(raw.tabId, prev, false);
+            await updateDegradedFlag(raw.tabId, false);
             return { ok: true };
           }
           case 'STOP_MONITOR': {
