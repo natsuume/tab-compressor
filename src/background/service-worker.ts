@@ -230,17 +230,29 @@ chrome.runtime.onMessage.addListener((raw, _sender, sendResponse) => {
       if (!('tabId' in raw)) {
         return { ok: false, error: `unhandled type: ${raw.type}` };
       }
-      // Offscreen から「track が ended して graph を捨てた」通知。
-      // navigation 起因の graph 破棄は handleTabNavigation が先行して実行し、その
-      // bestEffortDestroyGraph で entries から削除されるため、後続の `track.ended`
-      // で graph-registry の handleEnded が `entries.get(tabId)?.graph !== graph`
-      // で早期 return する → このルートには到達しない。
-      // よって GRAPH_LOST が SW に届くのは「動画停止やデバイス切断等で track が
-      // 自然に ended した」navigation 以外のケース。ユーザーが再生再開すれば次の
-      // MONITOR_TAB / ENABLE_TAB で attachOrToggleGraph のセルフヒーリング
-      // (SET_ENABLED → no-graph → SET_STREAM フォールバック) が再 attach する。
-      // SW 側では何もしないことで popup の並行通信との race を構造的に回避する。
+      // Offscreen から「track が ended して graph を捨てた」通知。navigation 起因は
+      // handleTabNavigation が先行処理するため graph-registry の handleEnded が
+      // 早期 return する → ここには到達しない。よって到達するのは動画停止・デバイス
+      // 切断等で track が自然に ended した非 navigation ケース。
+      // - enabled=true: UI と実体の乖離 (ON のまま graph 無し) を防ぐため再 attach を
+      //   試行。popup を開いている = activeTab grant あれば高確率で成功。失敗時は
+      //   auto-OFF に降格して UI 側も OFF にする。
+      // - enabled=false (bypass meter): popup 再オープンで復活するので no-op。
+      //
+      // attachOrToggleGraph は SET_ENABLED probe → no-graph → SET_STREAM フォール
+      // バックを持つので、並行 ENABLE_TAB / MONITOR_TAB との順序が前後しても最終
+      // 状態が整合する (graph 既存なら no-op、無ければ再構築)。
       if (raw.type === 'GRAPH_LOST') {
+        await withTabLock(raw.tabId, async () => {
+          const prev = await loadTabState(raw.tabId);
+          if (prev?.enabled !== true) return;
+          try {
+            await attachOrToggleGraph(raw.tabId, prev.params, true);
+          } catch (err) {
+            console.warn('[tab-compressor] reattach after GRAPH_LOST failed', err);
+            await demoteToOffAndCleanup(raw.tabId);
+          }
+        });
         return { ok: true };
       }
       // no-op で終わる可能性があるので Offscreen は作成しない。送信直前で必要なら作る。
