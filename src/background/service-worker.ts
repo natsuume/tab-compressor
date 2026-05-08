@@ -407,9 +407,18 @@ const handleTabNavigation = (
       await updateDegradedFlag(tabId, false);
     } catch (err) {
       console.warn('[tab-compressor] navigation reattach failed', err);
-      // setStreamForTab は old graph を先に破棄してから new stream を取りに行くため、
-      // 失敗時は Offscreen 側の entries は既に空になっている。SW 側 cache の整合性を
-      // 取るため monitoredTabs からも除く (次の MONITOR_TAB で SET_STREAM 経路に乗る)。
+      // attachOrToggleGraph は getTabMediaStreamId 段階で throw すると SET_STREAM 未送信
+      // のまま戻るため、Offscreen 側 entries に old graph が残っている可能性がある。
+      // 一方 SET_STREAM の段階で throw した場合は Offscreen 側 entries は既に空。
+      // どちらのケースでも整合性を取るために DESTROY_GRAPH を best-effort で送ってから
+      // monitoredTabs cache を整理する (no-graph は OffscreenNoGraphError で握りつぶす)。
+      if (await chrome.offscreen.hasDocument()) {
+        try {
+          await sendToOffscreen({ type: 'DESTROY_GRAPH', tabId });
+        } catch {
+          // 既に graph が無ければ no-op で良い。
+        }
+      }
       await removeMonitoredTab(tabId);
       if (enabled) await updateDegradedFlag(tabId, true);
       // popup が開いていれば再 MONITOR_TAB を送り、popup が閉じていれば storage の
