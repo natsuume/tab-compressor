@@ -389,6 +389,11 @@ const handleTabNavigation = (
   void withTabLock(tabId, async () => {
     if (!(await isMonitoredTab(tabId))) return;
     await demoteToOffAndCleanup(tabId);
+    // popup が開いていれば bypass meter 用に再 MONITOR_TAB を送らせる。
+    // SW 自身は送信元として受信しないが、popup と Offscreen には届く。
+    // Offscreen 側起点の GRAPH_LOST と同じ通知になるため popup の listener
+    // で統一的に処理できる。
+    void chrome.runtime.sendMessage({ type: 'GRAPH_LOST', tabId }).catch(() => undefined);
   });
 };
 
