@@ -231,34 +231,14 @@ chrome.runtime.onMessage.addListener((raw, _sender, sendResponse) => {
         return { ok: false, error: `unhandled type: ${raw.type}` };
       }
       // Offscreen から「track が ended して graph を捨てた」通知。
-      // popup を閉じている間は activeTab grant が無く再 attach 不可なため、
-      // 一律で auto-OFF (enabled=false に降格) にする。popup を開いてユーザーが
-      // 再度 ON を押せば確実に attach できる。
-      //
-      // ただし lock 取得を待つ間に別経路 (ENABLE_TAB 等) で graph が再構築された
-      // 場合、stale な GRAPH_LOST で新 graph を壊さないよう probe で生存確認する。
-      // SET_ENABLED は graph 生存中なら現在値で送れば実質 no-op、無ければ
-      // OffscreenNoGraphError を返すので破壊せずに有無を区別できる。
+      // 一律で auto-OFF (enabled=false に降格 + cache 整理) にする。popup の
+      // useMonitorTab はこの通知を listen しないので、ENABLE_TAB と並行 GRAPH_LOST
+      // の race は popup 経路には存在しない。ENABLE_TAB は withTabLock 経由で
+      // 直列化されるため、後着の demote が新規 ON を破壊することはあるが、それは
+      // 「graph lost したタイミングで偶然 ON 押下が同時発生した」極稀ケースで
+      // 仕様通り (lost イベントが新規 attach 時刻より後に処理されるなら destroy が正)。
       if (raw.type === 'GRAPH_LOST') {
-        await withTabLock(raw.tabId, async () => {
-          const prev = await loadTabState(raw.tabId);
-          if (prev !== undefined && (await chrome.offscreen.hasDocument())) {
-            try {
-              await sendToOffscreen({
-                type: 'SET_ENABLED',
-                tabId: raw.tabId,
-                enabled: prev.enabled,
-                params: prev.params,
-              });
-              // graph 存在 → stale GRAPH_LOST。何もしない。
-              return;
-            } catch (err) {
-              if (!(err instanceof OffscreenNoGraphError)) throw err;
-              // 想定通り graph 無し。demote へ進む。
-            }
-          }
-          await demoteToOffAndCleanup(raw.tabId);
-        });
+        await withTabLock(raw.tabId, () => demoteToOffAndCleanup(raw.tabId));
         return { ok: true };
       }
       // no-op で終わる可能性があるので Offscreen は作成しない。送信直前で必要なら作る。
@@ -389,11 +369,6 @@ const handleTabNavigation = (
   void withTabLock(tabId, async () => {
     if (!(await isMonitoredTab(tabId))) return;
     await demoteToOffAndCleanup(tabId);
-    // popup が開いていれば bypass meter 用に再 MONITOR_TAB を送らせる。
-    // SW 自身は送信元として受信しないが、popup と Offscreen には届く。
-    // Offscreen 側起点の GRAPH_LOST と同じ通知になるため popup の listener
-    // で統一的に処理できる。
-    void chrome.runtime.sendMessage({ type: 'GRAPH_LOST', tabId }).catch(() => undefined);
   });
 };
 
