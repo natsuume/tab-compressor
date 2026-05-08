@@ -190,6 +190,19 @@ const sendOrCleanupOnMissingGraph = async (
   }
 };
 
+// degraded フラグを更新する。enabled=true なのに graph が無い「圧縮されているはずなのに
+// 素通し」状態を popup に明示するために使う。state が無い場合や値が変わらない場合は no-op
+// (storage.onChanged の不要発火を避ける)。
+const updateDegradedFlag = async (
+  tabId: number,
+  degraded: boolean,
+): Promise<void> => {
+  const prev = await loadTabState(tabId);
+  if (prev === undefined) return;
+  if ((prev.degraded ?? false) === degraded) return;
+  await saveTabState(tabId, { ...prev, degraded });
+};
+
 // GRAPH_LOST 通知やナビゲーション破棄後など、graph が消えた契機からの共通復旧経路。
 // enabled=true なら最後の既知パラメータで再 attach を試行する。
 // 注: ここで monitoredTabs を直接消さず attachOrToggleGraph のセルフヒーリングに任せる。
@@ -199,8 +212,8 @@ const sendOrCleanupOnMissingGraph = async (
 // 新規 attach」の順で動くので、popup 先着ケースでも我々先着ケースでも整合する。
 //
 // 再 attach は best-effort (cross-origin navigation 等で activeTab grant が失効していると
-// 失敗しうる)。次の popup open 時の MONITOR_TAB で復旧するが、想定外の失敗を見落とさない
-// ようログだけ残す。
+// 失敗しうる)。失敗時は degraded=true で popup に警告表示させ、次の popup open 時の
+// MONITOR_TAB 成功で degraded=false に戻る。
 const tryReattachIfEnabled = async (
   tabId: number,
   cause: string,
@@ -209,8 +222,10 @@ const tryReattachIfEnabled = async (
   if (prev?.enabled !== true) return;
   try {
     await attachOrToggleGraph(tabId, prev.params, true);
+    await updateDegradedFlag(tabId, false);
   } catch (err) {
     console.warn(`[tab-compressor] re-attach after ${cause} failed`, err);
+    await updateDegradedFlag(tabId, true);
   }
 };
 
@@ -293,6 +308,9 @@ chrome.runtime.onMessage.addListener((raw, _sender, sendResponse) => {
             // GRAPH_LOST 通知が popup 側より遅れて届くケース (Offscreen → popup → SW の経路で
             // MONITOR_TAB が先に SW へ届く) でも、ここで死んだ graph を検出して再キャプチャできる。
             await attachOrToggleGraph(raw.tabId, params, enabled);
+            // popup を開いた契機で前回の degraded 状態 (ナビゲーション後の reattach 失敗等)
+            // から自動回復した場合に警告表示を消す。
+            await updateDegradedFlag(raw.tabId, false);
             return { ok: true };
           }
           case 'STOP_MONITOR': {
