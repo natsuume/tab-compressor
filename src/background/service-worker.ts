@@ -190,6 +190,30 @@ const sendOrCleanupOnMissingGraph = async (
   }
 };
 
+// GRAPH_LOST 通知やナビゲーション破棄後など、graph が消えた契機からの共通復旧経路。
+// enabled=true なら最後の既知パラメータで再 attach を試行する。
+// 注: ここで monitoredTabs を直接消さず attachOrToggleGraph のセルフヒーリングに任せる。
+// popup の MONITOR_TAB が先着して新 graph を構築している可能性があり、先に消すと
+// 新 graph が「監視外」のまま Offscreen に残るリーク (再 attach が失敗したケース) が起きうる。
+// attachOrToggleGraph は「graph 有なら SET_ENABLED で再確認 → missing なら cache 破棄 +
+// 新規 attach」の順で動くので、popup 先着ケースでも我々先着ケースでも整合する。
+//
+// 再 attach は best-effort (cross-origin navigation 等で activeTab grant が失効していると
+// 失敗しうる)。次の popup open 時の MONITOR_TAB で復旧するが、想定外の失敗を見落とさない
+// ようログだけ残す。
+const tryReattachIfEnabled = async (
+  tabId: number,
+  cause: string,
+): Promise<void> => {
+  const prev = await loadTabState(tabId);
+  if (prev?.enabled !== true) return;
+  try {
+    await attachOrToggleGraph(tabId, prev.params, true);
+  } catch (err) {
+    console.warn(`[tab-compressor] re-attach after ${cause} failed`, err);
+  }
+};
+
 chrome.runtime.onMessage.addListener((raw, _sender, sendResponse) => {
   if (!isMsg(raw)) {
     sendResponse({ ok: false, error: 'invalid message' });
@@ -205,25 +229,8 @@ chrome.runtime.onMessage.addListener((raw, _sender, sendResponse) => {
       // enabled なタブは popup を閉じても圧縮を維持する設計なので、ここで自動再 attach する。
       // disabled (bypass) モードは popup 側 GRAPH_LOST listener が再 MONITOR_TAB を送って
       // 復旧するので、SW 側では何もしない。
-      //
-      // 注: ここで monitoredTabs を直接消さず attachOrToggleGraph のセルフヒーリングに任せる。
-      // popup の MONITOR_TAB が先着して新 graph を構築している可能性があり、先に消すと
-      // 新 graph が「監視外」のまま Offscreen に残るリーク (再 attach が失敗したケース) が起きうる。
-      // attachOrToggleGraph は「graph 有なら SET_ENABLED で再確認 → missing なら cache 破棄 +
-      // 新規 attach」の順で動くので、popup 先着ケースでも我々先着ケースでも整合する。
       if (raw.type === 'GRAPH_LOST') {
-        await withTabLock(raw.tabId, async () => {
-          const prev = await loadTabState(raw.tabId);
-          if (prev?.enabled !== true) return;
-          try {
-            await attachOrToggleGraph(raw.tabId, prev.params, true);
-          } catch (err) {
-            // 再 attach は best-effort (cross-origin navigation 等で activeTab grant が
-            // 失効していると失敗しうる)。次の popup open 時の MONITOR_TAB で復旧するが、
-            // 想定外の失敗を見落とさないようログだけ残す。
-            console.warn('[tab-compressor] re-attach after GRAPH_LOST failed', err);
-          }
-        });
+        await withTabLock(raw.tabId, () => tryReattachIfEnabled(raw.tabId, 'GRAPH_LOST'));
         return { ok: true };
       }
       // no-op で終わる可能性があるので Offscreen は作成しない。送信直前で必要なら作る。
@@ -331,16 +338,20 @@ chrome.runtime.onMessage.addListener((raw, _sender, sendResponse) => {
 // - popup が開いていれば GRAPH_LOST broadcast → popup の useMonitorTab listener が再 MONITOR_TAB
 // - popup が閉じていて enabled=true のときは SW 内の best-effort 再 attach (activeTab が
 //   失効していると失敗する。次回の popup open で MONITOR_TAB から復旧)
-const handleTabNavigation = ({
-  tabId,
-  frameId,
-}: {
-  tabId: number;
-  frameId: number;
-}): void => {
-  if (frameId !== 0) return;
+const handleTabNavigation = (
+  details: chrome.webNavigation.WebNavigationFramedCallbackDetails,
+): void => {
+  if (details.frameId !== 0) return;
+  // Hot path 早期 return: webNavigation は全タブ全フレームで頻繁に発火する。
+  // cache が初期化済みかつ非対象タブなら withTabLock も async chain も取らずに抜ける。
+  // cache 未初期化 (SW 起動直後) はすり抜けて lock 内で確定判定する。
+  if (monitoredTabsCache !== null && !monitoredTabsCache.has(details.tabId)) return;
+  const { tabId } = details;
   void withTabLock(tabId, async () => {
     if (!(await isMonitoredTab(tabId))) return;
+    // hasDocument の事前チェックは意図的: Offscreen が消えている場合に
+    // sendToOffscreen → ensureOffscreenAndSync が「破棄のためだけ」に
+    // Offscreen を作り直してしまうのを防ぐ。
     if (await chrome.offscreen.hasDocument()) {
       try {
         await sendToOffscreen({ type: 'DESTROY_GRAPH', tabId });
@@ -349,18 +360,12 @@ const handleTabNavigation = ({
       }
     }
     await removeMonitoredTab(tabId);
-    // popup と Offscreen に通知 (SW 自身には届かない Chrome の sendMessage 仕様のため
-    // SW 内の自動再 attach はこの後に直接行う)。
+    // popup と Offscreen にだけ届く (SW 自身は Chrome の sendMessage 仕様で受信しない)。
+    // 自前の再 attach 経路は下の tryReattachIfEnabled で直接実行する。
     void chrome.runtime
       .sendMessage({ type: 'GRAPH_LOST', tabId })
       .catch(() => undefined);
-    const prev = await loadTabState(tabId);
-    if (prev?.enabled !== true) return;
-    try {
-      await attachOrToggleGraph(tabId, prev.params, true);
-    } catch (err) {
-      console.warn('[tab-compressor] re-attach after navigation failed', err);
-    }
+    await tryReattachIfEnabled(tabId, 'navigation');
   });
 };
 
