@@ -321,6 +321,52 @@ chrome.runtime.onMessage.addListener((raw, _sender, sendResponse) => {
   return true;
 });
 
+// タブ内ナビゲーション (フル page navigation, history.pushState 等の SPA) を能動検知し、
+// 現グラフを完全破棄する。MediaStreamTrack の `ended` イベントは
+// 「fully reload で track が live のまま silent 化」「pushState で document はそのまま」
+// 等のケースで発火しないため、`ended` 起点の検知では取りこぼす。graph が残ったままだと
+// `tabCapture` が拡張機能に専有された状態が続き、他のオーディオ系拡張も動かなくなる。
+//
+// 破棄後の復旧は既存経路に委ねる:
+// - popup が開いていれば GRAPH_LOST broadcast → popup の useMonitorTab listener が再 MONITOR_TAB
+// - popup が閉じていて enabled=true のときは SW 内の best-effort 再 attach (activeTab が
+//   失効していると失敗する。次回の popup open で MONITOR_TAB から復旧)
+const handleTabNavigation = ({
+  tabId,
+  frameId,
+}: {
+  tabId: number;
+  frameId: number;
+}): void => {
+  if (frameId !== 0) return;
+  void withTabLock(tabId, async () => {
+    if (!(await isMonitoredTab(tabId))) return;
+    if (await chrome.offscreen.hasDocument()) {
+      try {
+        await sendToOffscreen({ type: 'DESTROY_GRAPH', tabId });
+      } catch {
+        // 既に graph が無ければ no-op で良い。transport エラーも cache 整理は続行する。
+      }
+    }
+    await removeMonitoredTab(tabId);
+    // popup と Offscreen に通知 (SW 自身には届かない Chrome の sendMessage 仕様のため
+    // SW 内の自動再 attach はこの後に直接行う)。
+    void chrome.runtime
+      .sendMessage({ type: 'GRAPH_LOST', tabId })
+      .catch(() => undefined);
+    const prev = await loadTabState(tabId);
+    if (prev?.enabled !== true) return;
+    try {
+      await attachOrToggleGraph(tabId, prev.params, true);
+    } catch (err) {
+      console.warn('[tab-compressor] re-attach after navigation failed', err);
+    }
+  });
+};
+
+chrome.webNavigation.onCommitted.addListener(handleTabNavigation);
+chrome.webNavigation.onHistoryStateUpdated.addListener(handleTabNavigation);
+
 chrome.tabs.onRemoved.addListener((tabId) => {
   void withTabLock(tabId, async () => {
     await chrome.storage.session.remove(tabStorageKey(tabId));
