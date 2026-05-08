@@ -196,6 +196,20 @@ const sendOrCleanupOnMissingGraph = async (
   }
 };
 
+// graph を best-effort で破棄する。Offscreen が無ければ作らずに no-op、graph が
+// 既に無ければ OffscreenNoGraphError を握りつぶす。transport 失敗は warn を残す。
+// ナビゲーション失敗時の cleanup や onRemoved のような「graph が残っているか
+// 不確かな経路」で使う。
+const bestEffortDestroyGraph = async (tabId: number): Promise<void> => {
+  if (!(await chrome.offscreen.hasDocument())) return;
+  try {
+    await sendToOffscreen({ type: 'DESTROY_GRAPH', tabId });
+  } catch (err) {
+    if (err instanceof OffscreenNoGraphError) return;
+    console.warn('[tab-compressor] DESTROY_GRAPH failed', err);
+  }
+};
+
 // degraded フラグを更新する。enabled=true なのに graph が無い「圧縮されているはずなのに
 // 素通し」状態を popup に明示するために使う。state が無い場合や値が変わらない場合は no-op
 // (storage.onChanged の不要発火を避ける)。
@@ -410,15 +424,8 @@ const handleTabNavigation = (
       // attachOrToggleGraph は getTabMediaStreamId 段階で throw すると SET_STREAM 未送信
       // のまま戻るため、Offscreen 側 entries に old graph が残っている可能性がある。
       // 一方 SET_STREAM の段階で throw した場合は Offscreen 側 entries は既に空。
-      // どちらのケースでも整合性を取るために DESTROY_GRAPH を best-effort で送ってから
-      // monitoredTabs cache を整理する (no-graph は OffscreenNoGraphError で握りつぶす)。
-      if (await chrome.offscreen.hasDocument()) {
-        try {
-          await sendToOffscreen({ type: 'DESTROY_GRAPH', tabId });
-        } catch {
-          // 既に graph が無ければ no-op で良い。
-        }
-      }
+      // どちらのケースでも整合性を取るために best-effort で破棄してから cache を整理する。
+      await bestEffortDestroyGraph(tabId);
       await removeMonitoredTab(tabId);
       if (enabled) await updateDegradedFlag(tabId, true);
       // popup が開いていれば再 MONITOR_TAB を送り、popup が閉じていれば storage の
@@ -437,13 +444,7 @@ chrome.tabs.onRemoved.addListener((tabId) => {
   void withTabLock(tabId, async () => {
     await chrome.storage.session.remove(tabStorageKey(tabId));
     await removeMonitoredTab(tabId);
-    // Offscreen が無ければ destroy 対象も無いので作成しない。
-    if (!(await chrome.offscreen.hasDocument())) return;
-    try {
-      await sendToOffscreen({ type: 'DESTROY_GRAPH', tabId });
-    } catch {
-      // Offscreen might already be gone; safe to ignore.
-    }
+    await bestEffortDestroyGraph(tabId);
   });
 });
 
