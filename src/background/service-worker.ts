@@ -215,6 +215,24 @@ const bestEffortDestroyGraph = async (tabId: number): Promise<void> => {
   await tryDestroyGraph(tabId);
 };
 
+// auto-OFF (navigation 等による enabled=false への降格) をユーザーに伝えるバッジ。
+// popup を閉じている間に絶叫対策が黙って解除されると気づけないため、ツールバー
+// アイコンに「OFF」を表示する。popup を開く (MONITOR_TAB) か再度 ON にする
+// (ENABLE_TAB 成功) でクリアする。タブ固有バッジはフルナビゲーションやタブ
+// クローズでブラウザが自動クリアするが、auto-OFF は navigation の commit 後に
+// 走るため設定したバッジは次の navigation まで残る。
+const AUTO_OFF_BADGE_COLOR = '#d75c5c';
+
+const showAutoOffBadge = (tabId: number): void => {
+  void chrome.action.setBadgeText({ tabId, text: 'OFF' }).catch(() => undefined);
+  void chrome.action.setBadgeBackgroundColor({ tabId, color: AUTO_OFF_BADGE_COLOR })
+    .catch(() => undefined);
+};
+
+const clearAutoOffBadge = (tabId: number): void => {
+  void chrome.action.setBadgeText({ tabId, text: '' }).catch(() => undefined);
+};
+
 // navigation や Offscreen からの GRAPH_LOST 通知のように「graph を維持できなくなった」
 // 契機の共通処理。Chrome の tabCapture は popup を閉じている間の navigation 後に
 // activeTab grant が失効するため SW 単独で再 attach できない。自動再 attach を諦めて
@@ -232,6 +250,7 @@ const demoteToOffAndCleanup = async (tabId: number): Promise<void> => {
   const prev = await loadTabState(tabId);
   if (prev !== undefined && prev.enabled) {
     await saveTabState(tabId, { ...prev, enabled: false });
+    showAutoOffBadge(tabId);
   }
 };
 
@@ -348,6 +367,7 @@ chrome.runtime.onMessage.addListener((raw, _sender, sendResponse) => {
               params: raw.params,
             };
             await saveTabState(raw.tabId, next);
+            clearAutoOffBadge(raw.tabId);
             return { ok: true };
           }
           case 'DISABLE_TAB': {
@@ -388,6 +408,9 @@ chrome.runtime.onMessage.addListener((raw, _sender, sendResponse) => {
             const enabled = prev?.enabled === true;
             // attachOrToggleGraph は「graph があれば SET_ENABLED で再確認 → missing なら
             // cache を破棄して新規 attach」というセルフヒーリングを持つ。
+            // popup を開いた = auto-OFF に気づける状態なのでバッジは役目を終える。
+            // attach の成否に依存させないため先にクリアする。
+            clearAutoOffBadge(raw.tabId);
             // GRAPH_LOST 通知が popup 側より遅れて届くケース (Offscreen → popup → SW の経路で
             // MONITOR_TAB が先に SW へ届く) でも、ここで死んだ graph を検出して再キャプチャできる。
             await attachOrToggleGraph(raw.tabId, params, enabled);
