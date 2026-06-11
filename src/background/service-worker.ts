@@ -235,10 +235,25 @@ const demoteToOffAndCleanup = async (tabId: number): Promise<void> => {
   }
 };
 
+const parseMonitorPortTabId = (name: string): number | null => {
+  if (!name.startsWith(MONITOR_PORT_PREFIX)) return null;
+  const id = Number.parseInt(name.slice(MONITOR_PORT_PREFIX.length), 10);
+  return Number.isFinite(id) ? id : null;
+};
+
+// tabId ごとの生存中 monitor port。popup の document 破棄では React の cleanup が
+// 走らず STOP_MONITOR メッセージが届かないため、port の切断を解放契機にする。
+// SW 休止時は port ごと消えるが、popup 側が再接続して onConnect で再登録される。
+const monitorPorts = new Map<number, Set<chrome.runtime.Port>>();
+
 // popup が閉じた (= monitor port が切断された) 際の bypass グラフ解放。
 // enabled のグラフは popup を閉じても維持する。STOP_MONITOR メッセージと
 // port 切断の両方から呼ばれる共通処理。呼び出し側で withTabLock を取ること。
 const stopMonitoringIfBypass = async (tabId: number): Promise<void> => {
+  // 解放判断 (最終 port の切断) と lock 取得の間に新しい popup が開いている
+  // ことがある (旧 popup クローズ直後の再オープン)。lock 内で port の生存を
+  // 再確認し、生きた接続があれば新 popup の bypass グラフを巻き添えにしない。
+  if (monitorPorts.has(tabId)) return;
   if (!(await isMonitoredTab(tabId))) return;
   const prev = await loadTabState(tabId);
   if (prev?.enabled === true) {
@@ -254,17 +269,6 @@ const stopMonitoringIfBypass = async (tabId: number): Promise<void> => {
   }
   await removeMonitoredTab(tabId);
 };
-
-const parseMonitorPortTabId = (name: string): number | null => {
-  if (!name.startsWith(MONITOR_PORT_PREFIX)) return null;
-  const id = Number.parseInt(name.slice(MONITOR_PORT_PREFIX.length), 10);
-  return Number.isFinite(id) ? id : null;
-};
-
-// tabId ごとの生存中 monitor port。popup の document 破棄では React の cleanup が
-// 走らず STOP_MONITOR メッセージが届かないため、port の切断を解放契機にする。
-// SW 休止時は port ごと消えるが、popup 側が再接続して onConnect で再登録される。
-const monitorPorts = new Map<number, Set<chrome.runtime.Port>>();
 
 chrome.runtime.onConnect.addListener((port) => {
   const tabId = parseMonitorPortTabId(port.name);

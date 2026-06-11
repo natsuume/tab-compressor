@@ -29,12 +29,6 @@ export const useMonitorTab = (tabId: number | null, params: CompressorParams): v
   useEffect(() => {
     if (tabId === null) return;
 
-    void chrome.runtime.sendMessage({
-      type: 'MONITOR_TAB',
-      tabId,
-      params: paramsRef.current,
-    });
-
     // SW が休止すると SW 側の port が消えて切断イベントが popup に届く。
     // popup が開いている間は張り直して「popup 生存 = port 接続あり」の
     // 不変条件を維持する (再接続が SW を起こし、onConnect で再登録される)。
@@ -47,7 +41,16 @@ export const useMonitorTab = (tabId: number | null, params: CompressorParams): v
         if (!closed) connect();
       });
     };
+    // MONITOR_TAB より先に接続する: SW 側で port 登録が attach 処理より先に
+    // 完了しやすくなり、直前の popup クローズ由来の解放処理が lock 内の
+    // port 再確認で新 popup の存在に気づけるようにする。
     connect();
+
+    void chrome.runtime.sendMessage({
+      type: 'MONITOR_TAB',
+      tabId,
+      params: paramsRef.current,
+    });
 
     return () => {
       closed = true;
