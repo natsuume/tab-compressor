@@ -1,6 +1,5 @@
 import { useCallback, useEffect, useState } from 'react';
 import type { Msg } from '@/shared/messages';
-import type { CompressorParams } from '@/shared/compressor-params';
 import { DEFAULT_PARAMS, normalizeCompressorParams } from '@/shared/compressor-params';
 import { DEFAULT_PRESET_ID } from '@/shared/presets';
 import { tabStorageKey, type TabState } from '@/shared/tab-state';
@@ -28,7 +27,6 @@ export type UseTabStateResult = {
   isReady: boolean;
   enable: () => Promise<void>;
   disable: () => Promise<void>;
-  updateParams: (params: CompressorParams) => Promise<void>;
   setState: (next: TabState) => Promise<void>;
 };
 
@@ -81,14 +79,6 @@ export const useTabState = (tabId: number | null): UseTabStateResult => {
     await sendMessage({ type: 'DISABLE_TAB', tabId });
   }, [tabId]);
 
-  const updateParams = useCallback(
-    async (params: CompressorParams) => {
-      if (tabId === null) return;
-      await sendMessage({ type: 'UPDATE_PARAMS', tabId, params });
-    },
-    [tabId],
-  );
-
   const setState = useCallback(
     async (next: TabState) => {
       if (tabId === null) return;
@@ -108,5 +98,5 @@ export const useTabState = (tabId: number | null): UseTabStateResult => {
     [tabId],
   );
 
-  return { state, isReady, enable, disable, updateParams, setState };
+  return { state, isReady, enable, disable, setState };
 };

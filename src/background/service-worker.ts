@@ -372,7 +372,11 @@ chrome.runtime.onMessage.addListener((raw, _sender, sendResponse) => {
               presetId: DEFAULT_PRESET_ID,
               params: DEFAULT_PARAMS,
             };
-            const next: TabState = { ...prev, params: raw.params, presetId: 'custom' };
+            // presetId は変更しない。スライダー操作の custom 化は popup 側
+            // (handleParamsChange) の責務で、ここで 'custom' に上書きすると
+            // プリセット選択直後の UPDATE_PARAMS が選択した presetId を
+            // 即座に巻き戻してしまう。
+            const next: TabState = { ...prev, params: raw.params };
             await saveTabState(raw.tabId, next);
             if (await isMonitoredTab(raw.tabId)) {
               // enabled/bypass どちらでも makeupGain に manualMakeupGainDb が反映される。
