@@ -334,16 +334,18 @@ h3 {
   position: relative;
 }
 
+/* グラデーションはバー全幅に固定し、表示量は clip-path (inline style) で制御する。
+   先端の色 = 現在のレベル、になる (scaleX だとグラデーションごと縮んで先端が常に赤)。 */
 .meter-row__fill {
   position: absolute;
   inset: 0;
-  transform-origin: left center;
-  will-change: transform;
+  will-change: clip-path;
   background: linear-gradient(to right, #3fa066 60%, #dba13c 80%, #d75c5c 95%);
 }
 
+/* リダクションは深いほど先端が赤に近づく向き (浅い=琥珀 → 深い=赤)。 */
 .meter-row__fill--reduction {
-  background: linear-gradient(to right, #d75c5c, #dba13c);
+  background: linear-gradient(to right, #dba13c, #d75c5c);
 }
 
 .meter-row__value {

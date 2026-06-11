@@ -31,13 +31,17 @@ const MeterRow = ({
   const scale = reduction
     ? Math.min(1, Math.max(0, -db / 20))
     : dbToScale(db, METER_MIN_DB, METER_MAX_DB);
+  // scaleX で縮めるとグラデーションごと圧縮されて先端が常に終端色 (赤) になる。
+  // グラデーションはバー全幅に固定し、clip-path で右から切り取って表示量を
+  // 制御することで、先端の色が現在のレベルを表すようにする。
+  const clipPath = `inset(0 ${String((1 - scale) * 100)}% 0 0)`;
   return (
     <div className="meter-row">
       <span>{label}</span>
       <div className="meter-row__bar">
         <div
           className={reduction ? 'meter-row__fill meter-row__fill--reduction' : 'meter-row__fill'}
-          style={{ transform: `scaleX(${scale})` }}
+          style={{ clipPath }}
         />
       </div>
       <span className="meter-row__value">{formatDb(db)}</span>
