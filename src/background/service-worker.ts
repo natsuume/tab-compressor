@@ -4,6 +4,7 @@ import {
   OFFSCREEN_TARGET,
   type Msg,
 } from '@/shared/messages';
+import { MONITOR_PORT_PREFIX } from '@/shared/constants';
 import { tabStorageKey, type TabState } from '@/shared/tab-state';
 import {
   DEFAULT_PARAMS,
@@ -234,6 +235,64 @@ const demoteToOffAndCleanup = async (tabId: number): Promise<void> => {
   }
 };
 
+// popup が閉じた (= monitor port が切断された) 際の bypass グラフ解放。
+// enabled のグラフは popup を閉じても維持する。STOP_MONITOR メッセージと
+// port 切断の両方から呼ばれる共通処理。呼び出し側で withTabLock を取ること。
+const stopMonitoringIfBypass = async (tabId: number): Promise<void> => {
+  if (!(await isMonitoredTab(tabId))) return;
+  const prev = await loadTabState(tabId);
+  if (prev?.enabled === true) {
+    // enabled の間は popup を閉じてもグラフは維持する。
+    return;
+  }
+  // STOP_MONITOR は no-op 化された応答も返らないが、no-graph 応答だった
+  // ケースだけ握りつぶす (transport エラーは伝播させる)。
+  try {
+    await sendToOffscreen({ type: 'STOP_MONITOR', tabId });
+  } catch (err) {
+    if (!(err instanceof OffscreenNoGraphError)) throw err;
+  }
+  await removeMonitoredTab(tabId);
+};
+
+const parseMonitorPortTabId = (name: string): number | null => {
+  if (!name.startsWith(MONITOR_PORT_PREFIX)) return null;
+  const id = Number.parseInt(name.slice(MONITOR_PORT_PREFIX.length), 10);
+  return Number.isFinite(id) ? id : null;
+};
+
+// tabId ごとの生存中 monitor port。popup の document 破棄では React の cleanup が
+// 走らず STOP_MONITOR メッセージが届かないため、port の切断を解放契機にする。
+// SW 休止時は port ごと消えるが、popup 側が再接続して onConnect で再登録される。
+const monitorPorts = new Map<number, Set<chrome.runtime.Port>>();
+
+chrome.runtime.onConnect.addListener((port) => {
+  const tabId = parseMonitorPortTabId(port.name);
+  if (tabId === null) return;
+
+  let ports = monitorPorts.get(tabId);
+  if (ports === undefined) {
+    ports = new Set();
+    monitorPorts.set(tabId, ports);
+  }
+  ports.add(port);
+
+  port.onDisconnect.addListener(() => {
+    const set = monitorPorts.get(tabId);
+    set?.delete(port);
+    if (set !== undefined && set.size === 0) monitorPorts.delete(tabId);
+    // 再接続 (SW 休止からの復帰や StrictMode の再マウント) で別 port が
+    // 既に生きている間は popup 生存とみなし、解放しない。
+    if (monitorPorts.has(tabId)) return;
+    void (async () => {
+      await syncMonitoredTabsIfStale();
+      await withTabLock(tabId, () => stopMonitoringIfBypass(tabId));
+    })().catch((err: unknown) => {
+      console.warn('[tab-compressor] stop monitor on popup disconnect failed', err);
+    });
+  });
+});
+
 chrome.runtime.onMessage.addListener((raw, _sender, sendResponse) => {
   if (!isMsg(raw)) {
     sendResponse({ ok: false, error: 'invalid message' });
@@ -333,20 +392,7 @@ chrome.runtime.onMessage.addListener((raw, _sender, sendResponse) => {
             return { ok: true };
           }
           case 'STOP_MONITOR': {
-            if (!(await isMonitoredTab(raw.tabId))) return { ok: true };
-            const prev = await loadTabState(raw.tabId);
-            if (prev?.enabled === true) {
-              // enabled の間は popup を閉じてもグラフは維持する。
-              return { ok: true };
-            }
-            // STOP_MONITOR は no-op 化された応答も返らないが、no-graph 応答だった
-            // ケースだけ握りつぶす (transport エラーは伝播させる)。
-            try {
-              await sendToOffscreen({ type: 'STOP_MONITOR', tabId: raw.tabId });
-            } catch (err) {
-              if (!(err instanceof OffscreenNoGraphError)) throw err;
-            }
-            await removeMonitoredTab(raw.tabId);
+            await stopMonitoringIfBypass(raw.tabId);
             return { ok: true };
           }
           default:
