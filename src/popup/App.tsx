@@ -16,7 +16,7 @@ import { CompressorCurveChart } from './components/CompressorCurveChart';
 
 export const App = () => {
   const tabId = useCurrentTabId();
-  const { state, isReady, enable, disable, updateParams, setState } = useTabState(tabId);
+  const { state, isReady, enable, disable, setState } = useTabState(tabId);
   const meters = useMeterStream(tabId);
   const userPresets = useUserPresets();
   useMonitorTab(tabId, state.params);
@@ -29,12 +29,13 @@ export const App = () => {
     }
   }, [state.enabled, enable, disable]);
 
+  // setState が storage 書き込みと UPDATE_PARAMS 送信 (enabled 時) の両方を担う。
+  // ここで別途 updateParams を呼ぶと同一 params の UPDATE_PARAMS が二重送信される。
   const handleParamsChange = useCallback(
     (params: CompressorParams) => {
       void setState({ ...state, presetId: 'custom', params });
-      if (state.enabled) void updateParams(params);
     },
-    [state, setState, updateParams],
+    [state, setState],
   );
 
   const handleBuiltinPresetSelect = useCallback(

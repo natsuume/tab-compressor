@@ -367,13 +367,11 @@ chrome.runtime.onMessage.addListener((raw, _sender, sendResponse) => {
             return { ok: true };
           }
           case 'UPDATE_PARAMS': {
-            const prev = (await loadTabState(raw.tabId)) ?? {
-              enabled: false,
-              presetId: DEFAULT_PRESET_ID,
-              params: DEFAULT_PARAMS,
-            };
-            const next: TabState = { ...prev, params: raw.params, presetId: 'custom' };
-            await saveTabState(raw.tabId, next);
+            // storage への保存は送信元 (useTabState.setState) が送信前に行う契約。
+            // ここで load→save し直すと、(1) プリセット選択直後の presetId を
+            // 'custom' 等で巻き戻す (2) 連続スライダー操作時に古い params で
+            // 新しい書き込みを一瞬上書きする flap を生む、ため再保存しない。
+            // このハンドラの責務は offscreen への適用のみ。
             if (await isMonitoredTab(raw.tabId)) {
               // enabled/bypass どちらでも makeupGain に manualMakeupGainDb が反映される。
               await sendOrCleanupOnMissingGraph(raw.tabId, {
