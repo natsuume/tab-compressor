@@ -408,11 +408,12 @@ chrome.runtime.onMessage.addListener((raw, _sender, sendResponse) => {
             const enabled = prev?.enabled === true;
             // attachOrToggleGraph は「graph があれば SET_ENABLED で再確認 → missing なら
             // cache を破棄して新規 attach」というセルフヒーリングを持つ。
+            // popup を開いた = auto-OFF に気づける状態なのでバッジは役目を終える。
+            // attach の成否に依存させないため先にクリアする。
+            clearAutoOffBadge(raw.tabId);
             // GRAPH_LOST 通知が popup 側より遅れて届くケース (Offscreen → popup → SW の経路で
             // MONITOR_TAB が先に SW へ届く) でも、ここで死んだ graph を検出して再キャプチャできる。
             await attachOrToggleGraph(raw.tabId, params, enabled);
-            // popup を開いた = auto-OFF に気づける状態なのでバッジは役目を終える。
-            clearAutoOffBadge(raw.tabId);
             return { ok: true };
           }
           case 'STOP_MONITOR': {
