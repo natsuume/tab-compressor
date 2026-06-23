@@ -1,6 +1,6 @@
 {
   "name": "tab-compressor",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "description": "タブ単位で音声コンプレッサーを適用する Chrome 拡張",
   "private": true,
   "type": "module",
