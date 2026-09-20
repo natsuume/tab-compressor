@@ -383,8 +383,12 @@ chrome.runtime.onMessage.addListener((raw, _sender, sendResponse) => {
                 params,
               });
             }
-            if (prev !== undefined) {
-              await saveTabState(raw.tabId, { ...prev, enabled: false });
+            // offscreen 往復の間に popup が params / presetId を直接 storage へ書いている
+            // ことがあるため、attach 前の prev ではなく書き込み直前に読み直した値へ
+            // enabled=false を重ねる (popup の更新を巻き戻さない)。
+            const latest = await loadTabState(raw.tabId);
+            if (latest !== undefined) {
+              await saveTabState(raw.tabId, { ...latest, enabled: false });
             }
             return { ok: true };
           }
