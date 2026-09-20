@@ -215,12 +215,11 @@ const bestEffortDestroyGraph = async (tabId: number): Promise<void> => {
   await tryDestroyGraph(tabId);
 };
 
-// auto-OFF (navigation 等による enabled=false への降格) をユーザーに伝えるバッジ。
-// popup を閉じている間に絶叫対策が黙って解除されると気づけないため、ツールバー
-// アイコンに「OFF」を表示する。popup を開く (MONITOR_TAB) か再度 ON にする
-// (ENABLE_TAB 成功) でクリアする。タブ固有バッジはフルナビゲーションやタブ
-// クローズでブラウザが自動クリアするが、auto-OFF は navigation の commit 後に
-// 走るため設定したバッジは次の navigation まで残る。
+// auto-OFF (GRAPH_LOST 後の再 attach 失敗による enabled=false への降格) をユーザーに
+// 伝えるバッジ。popup を閉じている間に絶叫対策が黙って解除されると気づけないため、
+// ツールバーアイコンに「OFF」を表示する。popup を開く (MONITOR_TAB) か再度 ON にする
+// (ENABLE_TAB 成功) でクリアする。タブ固有バッジはフルナビゲーションやタブクローズで
+// ブラウザが自動クリアするため、その場合の掃除はブラウザに任せる。
 const AUTO_OFF_BADGE_COLOR = '#d75c5c';
 
 const showAutoOffBadge = (tabId: number): void => {
@@ -233,16 +232,14 @@ const clearAutoOffBadge = (tabId: number): void => {
   void chrome.action.setBadgeText({ tabId, text: '' }).catch(() => undefined);
 };
 
-// navigation や Offscreen からの GRAPH_LOST 通知のように「graph を維持できなくなった」
-// 契機の共通処理。Chrome の tabCapture は popup を閉じている間の navigation 後に
-// activeTab grant が失効するため SW 単独で再 attach できない。自動再 attach を諦めて
-// auto-OFF にする (graph 破棄 + monitoredTabs から除く + enabled=true なら enabled=false
-// に降格)。popup を開けば storage.onChanged で OFF UI に切り替わり、ユーザーが再度 ON を
-// 押せば activeTab grant が付与されて確実に attach できる。
+// GRAPH_LOST 後の再 attach に失敗した (= graph を維持できなくなった) 際の共通処理。
+// graph 破棄 + monitoredTabs から除く + enabled=true なら enabled=false に降格 (auto-OFF)
+// してバッジで通知する。popup を開けば storage.onChanged で OFF UI に切り替わり、
+// ユーザーが再度 ON を押せば activeTab grant が付与されて確実に attach できる。
 //
 // graph 破棄が transport エラーで失敗した場合は graph 生存の可能性があるため cache や
-// storage を触らない (orphan graph + UI=OFF の不整合を防ぐ)。次の navigation や popup
-// 操作で再試行される。
+// storage を触らない (orphan graph + UI=OFF の不整合を防ぐ)。次の popup 操作で
+// 再試行される。
 const demoteToOffAndCleanup = async (tabId: number): Promise<void> => {
   const destroyed = await tryDestroyGraph(tabId);
   if (!destroyed) return;
@@ -327,13 +324,14 @@ chrome.runtime.onMessage.addListener((raw, _sender, sendResponse) => {
       if (!('tabId' in raw)) {
         return { ok: false, error: `unhandled type: ${raw.type}` };
       }
-      // Offscreen から「track が ended して graph を捨てた」通知。navigation 起因は
-      // handleTabNavigation が先行処理するため graph-registry の handleEnded が
-      // 早期 return する → ここには到達しない。よって到達するのは動画停止・デバイス
-      // 切断等で track が自然に ended した非 navigation ケース。
+      // Offscreen から「track が ended して graph を捨てた」通知。tabCapture のキャプチャは
+      // タブ内のページ遷移を跨いで維持される仕様なので、ここに到達するのは動画停止・
+      // デバイス切断・遷移に伴う Chrome 内部の音声経路変化等で track が ended した
+      // ケース。
       // - enabled=true: UI と実体の乖離 (ON のまま graph 無し) を防ぐため再 attach を
-      //   試行。popup を開いている = activeTab grant あれば高確率で成功。失敗時は
-      //   auto-OFF に降格して UI 側も OFF にする。
+      //   試行。activeTab (tabCapture) の per-tab grant は同一オリジン内の遷移では維持
+      //   されるため、popup を閉じていても成功する。cross-origin 遷移後は grant が
+      //   失効しているため失敗し、auto-OFF に降格して UI 側も OFF にする。
       // - enabled=false (bypass meter): popup 再オープンで復活するので no-op。
       //
       // attachOrToggleGraph は SET_ENABLED probe → no-graph → SET_STREAM フォール
@@ -371,10 +369,11 @@ chrome.runtime.onMessage.addListener((raw, _sender, sendResponse) => {
             return { ok: true };
           }
           case 'DISABLE_TAB': {
+            // graph 側の bypass 切替が成功してから storage を OFF にする。先に OFF を
+            // 保存すると、SET_ENABLED が transport エラーで失敗したときに「UI=OFF だが
+            // graph は圧縮中」となり、その後の popup クローズで stopMonitoringIfBypass が
+            // enabled な graph を残したまま cache だけ消す orphan 経路になる。
             const prev = await loadTabState(raw.tabId);
-            if (prev !== undefined) {
-              await saveTabState(raw.tabId, { ...prev, enabled: false });
-            }
             const params = prev?.params ?? DEFAULT_PARAMS;
             if (await isMonitoredTab(raw.tabId)) {
               await sendOrCleanupOnMissingGraph(raw.tabId, {
@@ -383,6 +382,13 @@ chrome.runtime.onMessage.addListener((raw, _sender, sendResponse) => {
                 enabled: false,
                 params,
               });
+            }
+            // offscreen 往復の間に popup が params / presetId を直接 storage へ書いている
+            // ことがあるため、attach 前の prev ではなく書き込み直前に読み直した値へ
+            // enabled=false を重ねる (popup の更新を巻き戻さない)。
+            const latest = await loadTabState(raw.tabId);
+            if (latest !== undefined) {
+              await saveTabState(raw.tabId, { ...latest, enabled: false });
             }
             return { ok: true };
           }
@@ -435,45 +441,6 @@ chrome.runtime.onMessage.addListener((raw, _sender, sendResponse) => {
   });
   return true;
 });
-
-// タブ内ナビゲーション (フル page navigation, history.pushState 等の SPA) を能動検知し、
-// graph を破棄して enabled=false に降格する (auto-OFF)。`MediaStreamTrack.ended` は
-// 「fully reload で track が live のまま silent 化」「pushState で document はそのまま」
-// 等で発火しないため、`ended` 起点の検知では取りこぼす。graph を放置すると
-// `tabCapture` が拡張機能に専有された状態が続き、他のオーディオ系拡張も動かなくなる。
-//
-// 自動再 attach は試みない: Chrome の activeTab grant は navigation で失効するため、
-// popup を閉じている間は SW 単独で再 attach できない。代わりに「動画切替時は OFF
-// に戻る」という分かりやすい仕様にし、popup を開いたユーザーが再度 ON を押す。
-const handleTabNavigation = (
-  details: chrome.webNavigation.WebNavigationFramedCallbackDetails,
-): void => {
-  if (details.frameId !== 0) return;
-  // Hot path 早期 return: webNavigation は全タブ全フレームで頻繁に発火する。
-  // cache が初期化済みかつ非対象タブで、in-flight な per-tab 操作も無いなら
-  // withTabLock も async chain も取らずに抜ける。
-  // - cache 未初期化 (SW 起動直後) はすり抜けて lock 内で確定判定する。
-  // - tabLocks に entry がある場合 (例: MONITOR_TAB の attach が進行中で
-  //   addMonitoredTab がまだ反映前) は cache を信用できないため、lock を
-  //   取って attach 完了後の cache で判定し直す。これがないと「attach 完了直前に
-  //   navigation が発火 → fast-path で skip → 新 graph が pre-navigation stream で
-  //   構築されたまま生き残る」レースで取りこぼす。
-  if (
-    monitoredTabsCache !== null
-    && !monitoredTabsCache.has(details.tabId)
-    && !tabLocks.has(details.tabId)
-  ) {
-    return;
-  }
-  const { tabId } = details;
-  void withTabLock(tabId, async () => {
-    if (!(await isMonitoredTab(tabId))) return;
-    await demoteToOffAndCleanup(tabId);
-  });
-};
-
-chrome.webNavigation.onCommitted.addListener(handleTabNavigation);
-chrome.webNavigation.onHistoryStateUpdated.addListener(handleTabNavigation);
 
 chrome.tabs.onRemoved.addListener((tabId) => {
   void withTabLock(tabId, async () => {

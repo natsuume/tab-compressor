@@ -11,12 +11,12 @@ import { MONITOR_PORT_PREFIX } from '@/shared/constants';
 // Port の切断は document 破棄で確実に発火し、休止中の SW も起こすので、
 // SW 側の port.onDisconnect を解放契機にする。
 //
-// auto-OFF 仕様では graph が破棄されると SW 側で enabled=false に降格される。
-// popup を開いた状態で graph 破棄が起きた場合 LEVEL メーターは止まるが、
-// popup を再オープンすれば MONITOR_TAB が再送されて bypass attach が復活する。
-// あえて GRAPH_LOST listener を持たないことで「popup の MONITOR_TAB が SW の demote
-// より先着して storage の enabled=true で graph を復活させ auto-OFF を skip する」
-// race を構造的に塞ぐ。
+// graph が失われた (GRAPH_LOST) 場合の再 attach は SW 側が担い、失敗時は SW 側で
+// enabled=false に降格 (auto-OFF) される。popup を開いた状態で graph 破棄が起きた場合
+// LEVEL メーターは止まるが、popup を再オープンすれば MONITOR_TAB が再送されて bypass
+// attach が復活する。あえて GRAPH_LOST listener を持たないことで「popup の MONITOR_TAB が
+// SW の demote より先着して storage の enabled=true で graph を復活させ auto-OFF を skip
+// する」race を構造的に塞ぐ。
 export const useMonitorTab = (tabId: number | null, params: CompressorParams): void => {
   // params は MONITOR_TAB の初期値 fallback として使う。SW 側は storage の値を優先するので
   // 古い closure 値でも問題ないが、念のため最新を保持しておく。

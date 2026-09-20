@@ -13,11 +13,11 @@ type RegistryEntry = { tabId: number; graph: AudioGraph };
 let audioContext: AudioContext | null = null;
 const entries = new Map<number, RegistryEntry>();
 
-// tabCapture の MediaStream は、タブ内ナビゲーション (YouTube の SPA video 切替を含む)
-// でしばしば audio track が ended になる。死んだ track のまま放置すると入力レベル計測が
-// 0 で固まり、ユーザーには「ON/OFF を切り替えても LEVEL が変化しない」ように見える。
-// SW へ通知して monitoredTabs キャッシュを掃除し、popup 側の再 MONITOR_TAB で
-// 新しい streamId を取り直せるようにする。
+// tabCapture の MediaStream は、動画停止やデバイス切断、タブ内ナビゲーションに伴う
+// Chrome 内部の音声経路変化などで audio track が ended になることがある。死んだ track の
+// まま放置すると入力レベル計測が 0 で固まり、ユーザーには「ON/OFF を切り替えても LEVEL
+// が変化しない」ように見える。SW へ通知し、enabled なタブなら新しい streamId で再 attach
+// させる (失敗時は SW 側で auto-OFF に降格する)。
 const notifyGraphLost = (tabId: number): void => {
   void chrome.runtime.sendMessage({ type: 'GRAPH_LOST', tabId }).catch(() => undefined);
 };
