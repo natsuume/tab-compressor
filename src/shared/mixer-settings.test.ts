@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import {
   DEFAULT_MIXER_SETTINGS,
+  nextMixerSettingsUpdatedAt,
   normalizeMixerSettings,
   pickNewerMixerSettings,
   type MixerSettings,
@@ -65,5 +66,25 @@ describe('pickNewerMixerSettings', () => {
   it('届いた設定の方が古ければ無視して、手元の設定を保つ', () => {
     const incoming: MixerSettings = { autoBalance: true, updatedAt: 100 };
     expect(pickNewerMixerSettings(current, incoming)).toBe(current);
+  });
+});
+
+describe('nextMixerSettingsUpdatedAt', () => {
+  it('現在時刻が保存済みの値より後なら、現在時刻を返す', () => {
+    expect(nextMixerSettingsUpdatedAt(1_000, 5_000)).toBe(5_000);
+  });
+
+  it('時計が過去に戻って現在時刻が保存済みの値以下なら、保存済みの値 + 1 を返す', () => {
+    expect(nextMixerSettingsUpdatedAt(5_000, 1_000)).toBe(5_001);
+    expect(nextMixerSettingsUpdatedAt(5_000, 5_000)).toBe(5_001);
+  });
+
+  it('返した値で保存した設定は、保存済みの設定より新しいものとして採られる', () => {
+    const stored: MixerSettings = { autoBalance: false, updatedAt: 5_000 };
+    const next: MixerSettings = {
+      autoBalance: true,
+      updatedAt: nextMixerSettingsUpdatedAt(stored.updatedAt, 1_000),
+    };
+    expect(pickNewerMixerSettings(stored, next)).toBe(next);
   });
 });

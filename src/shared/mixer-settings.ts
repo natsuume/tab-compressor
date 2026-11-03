@@ -3,7 +3,8 @@
 // 自動で寄せる。false のときは各タブの手動オフセットだけを掛ける。
 export type MixerSettings = {
   autoBalance: boolean;
-  // popup で保存した時刻 (Date.now())。同じ設定の値が複数の経路で届いたときに、新しい方を採るために使う
+  // 保存のたびに増える版数 (nextMixerSettingsUpdatedAt で決める)。同じ設定の値が複数の経路で
+  // 届いたときに、新しい方を採るために使う
   updatedAt: number;
 };
 
@@ -38,6 +39,12 @@ export const pickNewerMixerSettings = (
   current: MixerSettings,
   incoming: MixerSettings,
 ): MixerSettings => (incoming.updatedAt >= current.updatedAt ? incoming : current);
+
+// 次に保存する設定の updatedAt を返す。基本は現在時刻 nowMs だが、保存済みの値 previousUpdatedAt
+// 以下にはしない (前回 + 1 以上にする)。システムの時計が過去に戻っても、新しい保存が
+// pickNewerMixerSettings で古い値として捨てられないようにするため。
+export const nextMixerSettingsUpdatedAt = (previousUpdatedAt: number, nowMs: number): number =>
+  Math.max(nowMs, previousUpdatedAt + 1);
 
 // chrome.storage.local から設定を読み込む。未保存なら DEFAULT_MIXER_SETTINGS。
 export const loadMixerSettings = async (): Promise<MixerSettings> => {

@@ -208,10 +208,13 @@ const loadMixerStreamState = async (tabId: number): Promise<MixerStreamState> =>
 
 // popup を開いた時点のタブのタイトルを、ミキサーの一覧に表示するために記録する。
 // popup を開いている = activeTab が付与されているので、tabs 権限なしでタイトルを取得できる。
+// シークレット ウィンドウのタブは記録しない。拡張の storage はシークレットと通常のウィンドウで
+// 共有されるため、記録すると通常ウィンドウの popup の一覧にタイトルが出てしまう。
 // 一覧の表示のためだけの記録なので、失敗してもログだけ出す。
 const recordTabTitle = async (tabId: number): Promise<void> => {
   try {
     const tab = await chrome.tabs.get(tabId);
+    if (tab.incognito) return;
     if (typeof tab.title === 'string' && tab.title.length > 0) {
       await saveTabTitle(tabId, tab.title);
     }
@@ -239,6 +242,10 @@ const attachOrToggleGraph = async (
     }
   }
   const streamId = await getTabMediaStreamId(tabId);
+  // ミキサー設定は Offscreen を作り終えてから読む。UPDATE_MIXER_SETTINGS は Offscreen が無いと
+  // 転送を見送るため、作成前に読むと「読んだ後・作成完了前」の設定変更がどこにも届かない。
+  // 作成後に読めば、読む前の変更はこの読み込みに、読んだ後の変更は転送に必ず含まれる。
+  await ensureOffscreenAndSync();
   const mixer = await loadMixerStreamState(tabId);
   await sendToOffscreen({ type: 'SET_STREAM', tabId, streamId, params, enabled, mixer });
   await addMonitoredTab(tabId);

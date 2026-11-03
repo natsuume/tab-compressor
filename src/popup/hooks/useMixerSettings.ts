@@ -4,6 +4,7 @@ import {
   DEFAULT_MIXER_SETTINGS,
   loadMixerSettings,
   MIXER_SETTINGS_STORAGE_KEY,
+  nextMixerSettingsUpdatedAt,
   normalizeMixerSettings,
   saveMixerSettings,
   type MixerSettings,
@@ -18,8 +19,8 @@ export type UseMixerSettingsResult = {
 };
 
 // chrome.storage.local の全タブ共通のミキサー設定を読み込み、storage.onChanged で変更を購読する。
-// update は保存時刻を付けて storage へ保存してから、Offscreen へ反映するよう SW に
-// UPDATE_MIXER_SETTINGS を送る。Offscreen は保存時刻の新しい方だけを採るので、attach と
+// update は版数 (updatedAt) を付けて storage へ保存してから、Offscreen へ反映するよう SW に
+// UPDATE_MIXER_SETTINGS を送る。Offscreen は版数の新しい方だけを採るので、attach と
 // 設定変更の順序が前後しても最新の設定が残る。画面への反映は storage.onChanged 経由で行う。
 export const useMixerSettings = (): UseMixerSettingsResult => {
   const [settings, setSettings] = useState<MixerSettings>(DEFAULT_MIXER_SETTINGS);
@@ -55,7 +56,13 @@ export const useMixerSettings = (): UseMixerSettingsResult => {
 
   const update = useCallback(
     async (next: Omit<MixerSettings, 'updatedAt'>): Promise<void> => {
-      const settingsToSave: MixerSettings = { ...next, updatedAt: Date.now() };
+      // 版数は画面の state ではなく storage の最新値から決める (別の popup が先に保存している場合も、
+      // その値より大きくするため)。
+      const stored = await loadMixerSettings();
+      const settingsToSave: MixerSettings = {
+        ...next,
+        updatedAt: nextMixerSettingsUpdatedAt(stored.updatedAt, Date.now()),
+      };
       await saveMixerSettings(settingsToSave);
       const message: Msg = { type: 'UPDATE_MIXER_SETTINGS', settings: settingsToSave };
       await chrome.runtime.sendMessage(message);
