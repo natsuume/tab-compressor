@@ -160,9 +160,10 @@ h3 {
   color: var(--color-text-faint);
 }
 
+/* auto-fit で空の列を畳み、プリセットが 1 つでも横幅いっぱいに表示する。 */
 .preset-selector {
   display: grid;
-  grid-template-columns: repeat(2, 1fr);
+  grid-template-columns: repeat(auto-fit, minmax(120px, 1fr));
   gap: 6px;
 }
 

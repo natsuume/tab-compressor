@@ -19,7 +19,7 @@ import { AutoEnableSettingsPanel } from './components/AutoEnableSettingsPanel';
 
 export const App = () => {
   const tabId = useCurrentTabId();
-  const { state, isReady, enable, disable, setState } = useTabState(tabId);
+  const { state, isReady, enable, disable, applyAutoEnable, setState } = useTabState(tabId);
   const meters = useMeterStream(tabId);
   const userPresets = useUserPresets();
   const {
@@ -85,11 +85,17 @@ export const App = () => {
     [state, setState, userPresets],
   );
 
+  // 設定を ON にしたときは、いま popup を開いているタブにもその場で適用する
+  // (popup を開いた時点の自動判定は、まだ設定が OFF だったため何もしていない)。
+  // SW は storage の設定を読んで判定するので、保存が終わってから依頼する。
   const handleAutoEnableChange = useCallback(
     (next: AutoEnableSettings) => {
-      void updateAutoEnableSettings(next);
+      const turnedOn = next.enabled && !autoEnableSettings.enabled;
+      void updateAutoEnableSettings(next).then(() => {
+        if (turnedOn) void applyAutoEnable();
+      });
     },
-    [updateAutoEnableSettings],
+    [autoEnableSettings.enabled, updateAutoEnableSettings, applyAutoEnable],
   );
 
   const controlsDisabled = !state.enabled;

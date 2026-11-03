@@ -152,7 +152,7 @@ const saveTabState = async (tabId: number, state: TabState): Promise<void> => {
   await chrome.storage.session.set({ [tabStorageKey(tabId)]: state });
 };
 
-// MONITOR_TAB 受信時に、自動有効化設定に従って ON にすべきかを判断する。
+// 自動有効化設定に従って ON にすべきかを判断する。
 // ON にする場合は保存すべき TabState、しない場合は null を返す。
 // TabState があるタブ (一度でも操作したタブ) は判定するまでもなく対象外なので、
 // 設定と My Presets の読み込みを省く。
@@ -195,6 +195,21 @@ const attachOrToggleGraph = async (
   const streamId = await getTabMediaStreamId(tabId);
   await sendToOffscreen({ type: 'SET_STREAM', tabId, streamId, params, enabled });
   await addMonitoredTab(tabId);
+};
+
+// 未操作のタブ (TabState が無いタブ) を、自動有効化設定に従って ON にする。ON にしたら true。
+// popup を開いた時点 (MONITOR_TAB) と、popup で設定を ON にした直後 (APPLY_AUTO_ENABLE) の
+// 両方から呼ぶ。どちらも popup が開いている = activeTab が付与されているので tabCapture できる。
+// ENABLE_TAB と同じく attach が成功してから storage を更新する。呼び出し側で withTabLock を取ること。
+const applyAutoEnableIfUntouched = async (
+  tabId: number,
+  prev: TabState | undefined,
+): Promise<boolean> => {
+  const autoEnabledState = await loadAutoEnableStateForUntouchedTab(prev);
+  if (autoEnabledState === null) return false;
+  await attachOrToggleGraph(tabId, autoEnabledState.params, true);
+  await saveTabState(tabId, autoEnabledState);
+  return true;
 };
 
 // SET_ENABLED / UPDATE_PARAMS が "no graph" で失敗した場合のみ cache 不整合を解消する。
@@ -440,14 +455,7 @@ chrome.runtime.onMessage.addListener((raw, _sender, sendResponse) => {
             // attach の成否に依存させないため先にクリアする。
             clearAutoOffBadge(raw.tabId);
             // 一度も操作していないタブは、自動有効化設定が ON なら指定プリセットで ON にする。
-            // popup を開いた時点で activeTab が付与されているので、ここで tabCapture できる。
-            // ENABLE_TAB と同じく attach が成功してから storage を更新する。
-            const autoEnabledState = await loadAutoEnableStateForUntouchedTab(prev);
-            if (autoEnabledState !== null) {
-              await attachOrToggleGraph(raw.tabId, autoEnabledState.params, true);
-              await saveTabState(raw.tabId, autoEnabledState);
-              return { ok: true };
-            }
+            if (await applyAutoEnableIfUntouched(raw.tabId, prev)) return { ok: true };
             const params = normalizeCompressorParams(prev?.params ?? raw.params);
             const enabled = prev?.enabled === true;
             // attachOrToggleGraph は「graph があれば SET_ENABLED で再確認 → missing なら
@@ -455,6 +463,13 @@ chrome.runtime.onMessage.addListener((raw, _sender, sendResponse) => {
             // GRAPH_LOST 通知が popup 側より遅れて届くケース (Offscreen → popup → SW の経路で
             // MONITOR_TAB が先に SW へ届く) でも、ここで死んだ graph を検出して再キャプチャできる。
             await attachOrToggleGraph(raw.tabId, params, enabled);
+            return { ok: true };
+          }
+          case 'APPLY_AUTO_ENABLE': {
+            // popup で自動有効化設定を ON にした直後に届く。popup を開いた時点 (MONITOR_TAB) では
+            // まだ設定が OFF だったタブも、未操作ならここで ON にする。
+            const prev = await loadTabState(raw.tabId);
+            await applyAutoEnableIfUntouched(raw.tabId, prev);
             return { ok: true };
           }
           case 'STOP_MONITOR': {

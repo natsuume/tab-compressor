@@ -81,7 +81,7 @@ export const AutoEnableSettingsPanel = ({
         </select>
       </div>
       <p id={hintId} className="info-text">
-        タブごとに最初に popup を開いたとき、選んだプリセットで ON になります。一度 OFF にしたタブには適用されません。
+        未操作のタブで popup を開いたとき (またはチェックを入れたとき) に、選んだプリセットで ON になります。一度 OFF にしたタブには適用されません。
       </p>
     </div>
   );

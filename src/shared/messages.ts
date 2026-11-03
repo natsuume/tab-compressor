@@ -7,6 +7,8 @@ export type Msg =
   | { type: 'SET_STREAM'; tabId: number; streamId: string; params: CompressorParams; enabled: boolean }
   | { type: 'SET_ENABLED'; tabId: number; enabled: boolean; params: CompressorParams }
   | { type: 'MONITOR_TAB'; tabId: number; params: CompressorParams }
+  // 自動有効化設定を ON にした直後に popup から送る。未操作のタブなら設定に従って ON にする
+  | { type: 'APPLY_AUTO_ENABLE'; tabId: number }
   | { type: 'STOP_MONITOR'; tabId: number }
   | { type: 'DESTROY_GRAPH'; tabId: number }
   | { type: 'GRAPH_LOST'; tabId: number }

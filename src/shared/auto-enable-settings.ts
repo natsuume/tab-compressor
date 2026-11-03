@@ -8,7 +8,8 @@ export type AutoEnablePresetRef = PresetId | UserPresetId;
 
 // 全タブ共通の自動有効化設定。chrome.storage.local に保存し、ブラウザ再起動後も保持する。
 // enabled=true のとき、まだ一度も操作していないタブ (TabState が無いタブ) で popup を開くと、
-// presetId のプリセットでコンプレッサーを ON にする。
+// presetId のプリセットでコンプレッサーを ON にする。popup で設定を ON にしたときに
+// 開いているタブも、未操作ならその場で ON にする。
 // tabCapture はユーザーが拡張を呼び出したタブでしか使えないため、popup を開く前
 // (タブを開いただけの時点) には ON にできない。
 export type AutoEnableSettings = {
