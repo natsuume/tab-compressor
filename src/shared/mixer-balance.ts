@@ -15,6 +15,10 @@ export type MixerConfig = {
   minAutoGainDb: number;
   // 自動補正の上限 (dB)
   maxAutoGainDb: number;
+  // 状態を初期化してからこの秒数までのブロックは平均に使わない。コンプレッサーを ON にした直後は
+  // compressor 出力側の AnalyserNode の窓 (2048 サンプル) がまだ新しい音で埋まっておらず、
+  // 実際より低い値を平均の初期値にしてしまうため
+  warmupSec: number;
 };
 
 export const MIXER_CONFIG: MixerConfig = {
@@ -23,6 +27,7 @@ export const MIXER_CONFIG: MixerConfig = {
   soundingHoldSec: 3,
   minAutoGainDb: -12,
   maxAutoGainDb: 12,
+  warmupSec: 0.2,
 };
 
 // タブ 1 つ分の音量の計測状態。
@@ -31,28 +36,34 @@ export type TabLoudnessState = {
   loudnessDb: number | null;
   // 最後に入力がゲートを超えてからの経過秒
   silentSec: number;
+  // 状態を初期化してからの経過秒 (warmupSec の判定に使う)
+  elapsedSec: number;
 };
 
 // 未計測のタブは、一度も音が出ていない (経過秒が無限大) ものとして扱う。
 export const INITIAL_TAB_LOUDNESS_STATE: TabLoudnessState = {
   loudnessDb: null,
   silentSec: Number.POSITIVE_INFINITY,
+  elapsedSec: 0,
 };
 
 export type TabLoudnessMeasurement = {
   // 今回のブロックの入力 RMS (dBFS)。ゲート判定に使う
   inputDb: number;
-  // 今回のブロックのミキサー手前の音量 (dBFS)
-  preMixerDb: number;
+  // 今回のブロックのミキサー手前の音量 (dBFS)。compressor 出力が 0 で計測できなければ null
+  preMixerDb: number | null;
   // 前回の計測からの経過秒
   dtSec: number;
 };
 
 // 計測値 1 ブロック分でタブの音量の状態を更新し、新しい状態オブジェクトを返す (引数は変更しない)。
-// - inputDb が config.gateDb 未満なら、loudnessDb は据え置き、silentSec に dtSec を足す
-// - それ以外は loudnessDb を
-//   updateExponentialAverage(loudnessDb, preMixerDb, dtSec, config.loudnessTimeConstantSec)
-//   で更新し、silentSec を 0 に戻す
+// どの場合も elapsedSec に dtSec を足す。そのうえで上から順に判定する。
+// 1. 足した後の elapsedSec が config.warmupSec 未満なら、loudnessDb と silentSec は据え置く
+// 2. inputDb が config.gateDb 未満なら、loudnessDb は据え置き、silentSec に dtSec を足す
+// 3. preMixerDb が null なら、loudnessDb と silentSec は据え置く
+// 4. それ以外は loudnessDb を
+//    updateExponentialAverage(loudnessDb, preMixerDb, dtSec, config.loudnessTimeConstantSec)
+//    で更新し、silentSec を 0 に戻す
 export const stepTabLoudness = (
   _state: TabLoudnessState,
   _measurement: TabLoudnessMeasurement,
@@ -107,7 +118,9 @@ export type PreMixerLevelInput = {
 // ミキサー手前 (autoMakeupGain の出力) の音量 (dBFS) を、compressor 出力の計測値に
 // makeupGain と autoMakeupGain のゲインを足して求める。
 // meanSquareToDb(compressedMeanSquare) + staticCompensationDb + manualMakeupGainDb + (autoMakeupDb ?? 0)
-export const estimatePreMixerDb = (_input: PreMixerLevelInput): number => {
+// compressedMeanSquare が 0 以下なら計測できないものとして null を返す
+// (DB_FLOOR に丸めた値を音量として平均に入れないため)。
+export const estimatePreMixerDb = (_input: PreMixerLevelInput): number | null => {
   throw new Error('not implemented');
 };
 

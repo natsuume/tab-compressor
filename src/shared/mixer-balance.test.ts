@@ -12,25 +12,60 @@ import {
   type TabLoudnessState,
 } from './mixer-balance';
 
+// warm-up を過ぎた未計測の状態 (ON にしてから十分時間が経ち、まだ音が出ていないタブ)。
+const WARMED_UP_INITIAL_STATE: TabLoudnessState = {
+  ...INITIAL_TAB_LOUDNESS_STATE,
+  elapsedSec: MIXER_CONFIG.warmupSec,
+};
+
 describe('stepTabLoudness', () => {
-  it('初期状態にゲート以上のブロックを与えると、その音量で平均を始めて無音の経過秒を 0 にする', () => {
-    const next = stepTabLoudness(INITIAL_TAB_LOUDNESS_STATE, {
+  it('warm-up を過ぎた未計測の状態にゲート以上のブロックを与えると、その音量で平均を始めて無音の経過秒を 0 にする', () => {
+    const next = stepTabLoudness(WARMED_UP_INITIAL_STATE, {
       inputDb: -20,
       preMixerDb: -24,
       dtSec: 0.1,
     });
-    expect(next).toEqual({ loudnessDb: -24, silentSec: 0 });
+    expect(next.loudnessDb).toBe(-24);
+    expect(next.silentSec).toBe(0);
+    expect(next.elapsedSec).toBeCloseTo(MIXER_CONFIG.warmupSec + 0.1);
+  });
+
+  it('初期化から warm-up (0.2 秒) 未満のブロックは、ゲート以上でも平均に使わない', () => {
+    const next = stepTabLoudness(INITIAL_TAB_LOUDNESS_STATE, {
+      inputDb: -20,
+      preMixerDb: -90,
+      dtSec: 0.1,
+    });
+    expect(next.loudnessDb).toBeNull();
+    expect(next.silentSec).toBe(Number.POSITIVE_INFINITY);
+    expect(next.elapsedSec).toBeCloseTo(0.1);
+  });
+
+  it('warm-up を過ぎた最初のブロックから平均に使う', () => {
+    const afterWarmup = stepTabLoudness(
+      { ...INITIAL_TAB_LOUDNESS_STATE, elapsedSec: 0.15 },
+      { inputDb: -20, preMixerDb: -24, dtSec: 0.1 },
+    );
+    expect(afterWarmup.loudnessDb).toBe(-24);
   });
 
   it('入力がゲート未満なら、音量の平均は据え置き、無音の経過秒が dtSec だけ増える', () => {
-    const state: TabLoudnessState = { loudnessDb: -24, silentSec: 1 };
+    const state: TabLoudnessState = { loudnessDb: -24, silentSec: 1, elapsedSec: 10 };
     const next = stepTabLoudness(state, { inputDb: -60, preMixerDb: -70, dtSec: 0.1 });
     expect(next.loudnessDb).toBe(-24);
     expect(next.silentSec).toBeCloseTo(1.1);
   });
 
+  it('ミキサー手前の音量が計測できない (null) ブロックでは、音量の平均と無音の経過秒を据え置く', () => {
+    const state: TabLoudnessState = { loudnessDb: -24, silentSec: 1, elapsedSec: 10 };
+    const next = stepTabLoudness(state, { inputDb: -20, preMixerDb: null, dtSec: 0.1 });
+    expect(next.loudnessDb).toBe(-24);
+    expect(next.silentSec).toBe(1);
+    expect(next.elapsedSec).toBeCloseTo(10.1);
+  });
+
   it('時定数と同じ経過秒の 1 ブロックでは、前回の平均から今回の音量へ約 63.2% 進む', () => {
-    const state: TabLoudnessState = { loudnessDb: -24, silentSec: 0 };
+    const state: TabLoudnessState = { loudnessDb: -24, silentSec: 0, elapsedSec: 10 };
     const next = stepTabLoudness(state, {
       inputDb: -20,
       preMixerDb: -14,
@@ -42,7 +77,7 @@ describe('stepTabLoudness', () => {
   });
 
   it('引数の state と measurement を変更せず、ゲートの有無に関わらず新しい state を返す', () => {
-    const state: TabLoudnessState = { loudnessDb: -24, silentSec: 1 };
+    const state: TabLoudnessState = { loudnessDb: -24, silentSec: 1, elapsedSec: 10 };
     const sounding: TabLoudnessMeasurement = { inputDb: -20, preMixerDb: -14, dtSec: 0.1 };
     const silent: TabLoudnessMeasurement = { inputDb: -60, preMixerDb: -70, dtSec: 0.1 };
     const stateBefore = { ...state };
@@ -62,19 +97,19 @@ describe('stepTabLoudness', () => {
 
 describe('isTabSounding', () => {
   it('音量が未計測なら、無音の経過秒に関わらず false', () => {
-    expect(isTabSounding({ loudnessDb: null, silentSec: 0 })).toBe(false);
+    expect(isTabSounding({ loudnessDb: null, silentSec: 0, elapsedSec: 10 })).toBe(false);
   });
 
   it('音が出た直後 (経過秒 0) は true', () => {
-    expect(isTabSounding({ loudnessDb: -20, silentSec: 0 })).toBe(true);
+    expect(isTabSounding({ loudnessDb: -20, silentSec: 0, elapsedSec: 10 })).toBe(true);
   });
 
   it('無音の経過秒が保持時間 (3 秒) ちょうどまでは true', () => {
-    expect(isTabSounding({ loudnessDb: -20, silentSec: 3 })).toBe(true);
+    expect(isTabSounding({ loudnessDb: -20, silentSec: 3, elapsedSec: 10 })).toBe(true);
   });
 
   it('無音の経過秒が保持時間 (3 秒) を超えると false', () => {
-    expect(isTabSounding({ loudnessDb: -20, silentSec: 3.1 })).toBe(false);
+    expect(isTabSounding({ loudnessDb: -20, silentSec: 3.1, elapsedSec: 10 })).toBe(false);
   });
 });
 
@@ -186,6 +221,17 @@ describe('estimatePreMixerDb', () => {
         autoMakeupDb: null,
       }),
     ).toBeCloseTo(-27);
+  });
+
+  it('compressor 出力の平均二乗が 0 なら、計測できないものとして null を返す', () => {
+    expect(
+      estimatePreMixerDb({
+        compressedMeanSquare: 0,
+        staticCompensationDb: -3,
+        manualMakeupGainDb: -4,
+        autoMakeupDb: null,
+      }),
+    ).toBeNull();
   });
 });
 
