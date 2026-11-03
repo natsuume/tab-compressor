@@ -515,7 +515,8 @@ chrome.tabs.onRemoved.addListener((tabId) => {
 chrome.runtime.onStartup.addListener(() => {
   void (async () => {
     await chrome.storage.session.clear();
-    // タブ ID はブラウザ起動ごとに振り直されるため、前回のセッションの手動 OFF の記録は捨てる。
+    // タブ ID の一意性はブラウザセッション内でしか保証されないため、前回のセッションの
+    // 手動 OFF の記録は捨てる。
     await clearManuallyDisabledTabs();
     await resetMonitoredTabs();
   })();
