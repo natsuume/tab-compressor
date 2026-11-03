@@ -13,12 +13,14 @@ export type UseMixerSettingsResult = {
   settings: MixerSettings;
   // storage からの初回読み込みが終わったか (失敗した場合も既定値で true になる)
   isReady: boolean;
-  update: (next: MixerSettings) => Promise<void>;
+  // 保存時刻 (updatedAt) は update が付けるので、呼び出し側は変えたい値だけを渡す
+  update: (next: Omit<MixerSettings, 'updatedAt'>) => Promise<void>;
 };
 
 // chrome.storage.local の全タブ共通のミキサー設定を読み込み、storage.onChanged で変更を購読する。
-// update は storage へ保存してから、Offscreen へ反映するよう SW に UPDATE_MIXER_SETTINGS を送る。
-// 画面への反映は storage.onChanged 経由で行う。
+// update は保存時刻を付けて storage へ保存してから、Offscreen へ反映するよう SW に
+// UPDATE_MIXER_SETTINGS を送る。Offscreen は保存時刻の新しい方だけを採るので、attach と
+// 設定変更の順序が前後しても最新の設定が残る。画面への反映は storage.onChanged 経由で行う。
 export const useMixerSettings = (): UseMixerSettingsResult => {
   const [settings, setSettings] = useState<MixerSettings>(DEFAULT_MIXER_SETTINGS);
   const [isReady, setIsReady] = useState(false);
@@ -51,11 +53,15 @@ export const useMixerSettings = (): UseMixerSettingsResult => {
     };
   }, []);
 
-  const update = useCallback(async (next: MixerSettings): Promise<void> => {
-    await saveMixerSettings(next);
-    const message: Msg = { type: 'UPDATE_MIXER_SETTINGS', settings: next };
-    await chrome.runtime.sendMessage(message);
-  }, []);
+  const update = useCallback(
+    async (next: Omit<MixerSettings, 'updatedAt'>): Promise<void> => {
+      const settingsToSave: MixerSettings = { ...next, updatedAt: Date.now() };
+      await saveMixerSettings(settingsToSave);
+      const message: Msg = { type: 'UPDATE_MIXER_SETTINGS', settings: settingsToSave };
+      await chrome.runtime.sendMessage(message);
+    },
+    [],
+  );
 
   return { settings, isReady, update };
 };

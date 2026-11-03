@@ -3,25 +3,41 @@
 // 自動で寄せる。false のときは各タブの手動オフセットだけを掛ける。
 export type MixerSettings = {
   autoBalance: boolean;
+  // popup で保存した時刻 (Date.now())。同じ設定の値が複数の経路で届いたときに、新しい方を採るために使う
+  updatedAt: number;
 };
 
 export const MIXER_SETTINGS_STORAGE_KEY = 'mixer_settings';
 
 export const DEFAULT_MIXER_SETTINGS: MixerSettings = {
   autoBalance: false,
+  updatedAt: 0,
 };
 
 // storage から読んだ値を MixerSettings に整える。
 // - object でなければ DEFAULT_MIXER_SETTINGS を返す
 // - autoBalance が boolean でなければ DEFAULT_MIXER_SETTINGS.autoBalance を使う
+// - updatedAt が有限かつ 0 以上の number でなければ 0 を使う
 export const normalizeMixerSettings = (raw: unknown): MixerSettings => {
   if (typeof raw !== 'object' || raw === null) return DEFAULT_MIXER_SETTINGS;
   const autoBalance = 'autoBalance' in raw ? raw.autoBalance : undefined;
+  const updatedAt = 'updatedAt' in raw ? raw.updatedAt : undefined;
   return {
     autoBalance:
       typeof autoBalance === 'boolean' ? autoBalance : DEFAULT_MIXER_SETTINGS.autoBalance,
+    updatedAt:
+      typeof updatedAt === 'number' && Number.isFinite(updatedAt) && updatedAt >= 0
+        ? updatedAt
+        : DEFAULT_MIXER_SETTINGS.updatedAt,
   };
 };
+
+// 手元の設定 current と、届いた設定 incoming のうち、保存時刻が新しい方を返す。
+// 保存時刻が同じなら incoming を採る。
+export const pickNewerMixerSettings = (
+  current: MixerSettings,
+  incoming: MixerSettings,
+): MixerSettings => (incoming.updatedAt >= current.updatedAt ? incoming : current);
 
 // chrome.storage.local から設定を読み込む。未保存なら DEFAULT_MIXER_SETTINGS。
 export const loadMixerSettings = async (): Promise<MixerSettings> => {

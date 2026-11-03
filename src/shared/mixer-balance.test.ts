@@ -179,7 +179,7 @@ describe('computeAutoBalanceGains', () => {
     expect(lowered).toEqual(new Map([[1, 0], [2, 0], [3, MIXER_CONFIG.minAutoGainDb]]));
   });
 
-  it('対象のタブが 0 件なら空の Map を返す', () => {
+  it('ON のタブが無い、または対象のタブが 0 件なら空の Map を返す', () => {
     expect(computeAutoBalanceGains([]).size).toBe(0);
     expect(
       computeAutoBalanceGains([
@@ -189,12 +189,24 @@ describe('computeAutoBalanceGains', () => {
     ).toBe(0);
   });
 
-  it('対象のタブが 1 件なら、そのタブの補正は 0', () => {
+  it('音が出ているタブが 1 つだけなら、空の Map を返す (前回の補正を据え置く)', () => {
     const gains = computeAutoBalanceGains([
       { tabId: 1, loudnessDb: -25, sounding: true },
       { tabId: 2, loudnessDb: -10, sounding: false },
     ]);
-    expect(gains).toEqual(new Map([[1, 0]]));
+    expect(gains.size).toBe(0);
+  });
+
+  it('ON のタブが 1 つだけなら、音が出ているかどうかに関わらずそのタブの補正を 0 にする', () => {
+    expect(
+      computeAutoBalanceGains([{ tabId: 1, loudnessDb: -25, sounding: true }]),
+    ).toEqual(new Map([[1, 0]]));
+    expect(
+      computeAutoBalanceGains([{ tabId: 1, loudnessDb: -25, sounding: false }]),
+    ).toEqual(new Map([[1, 0]]));
+    expect(
+      computeAutoBalanceGains([{ tabId: 1, loudnessDb: null, sounding: true }]),
+    ).toEqual(new Map([[1, 0]]));
   });
 });
 

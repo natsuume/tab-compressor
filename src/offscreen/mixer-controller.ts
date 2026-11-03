@@ -7,16 +7,22 @@ import {
   isTabSounding,
   stepTabLoudness,
 } from '@/shared/mixer-balance';
+import {
+  DEFAULT_MIXER_SETTINGS,
+  pickNewerMixerSettings,
+  type MixerSettings,
+} from '@/shared/mixer-settings';
 import { setMixerGainDb } from './audio-graph';
 import type { RegistryEntry } from './graph-registry';
 import type { GraphLevels } from './level-sampler';
 
-// 自動追従 (音量バランスを自動で揃える) の ON / OFF。全タブ共通の設定で、
-// SET_STREAM / SET_AUTO_BALANCE で受け取った値に更新する。
-let autoBalanceEnabled = false;
+// 全タブ共通のミキサー設定 (自動追従の ON / OFF)。Offscreen は chrome.storage を読めないため、
+// SW から SET_STREAM / SET_MIXER_SETTINGS で値を受け取る。attach と設定変更の順序が前後しても
+// 最新の設定が残るよう、保存時刻 (updatedAt) の新しい方を採る。
+let mixerSettings: MixerSettings = DEFAULT_MIXER_SETTINGS;
 
-export const setAutoBalanceEnabled = (enabled: boolean): void => {
-  autoBalanceEnabled = enabled;
+export const applyMixerSettings = (incoming: MixerSettings): void => {
+  mixerSettings = pickNewerMixerSettings(mixerSettings, incoming);
 };
 
 export type MixerTickInput = {
@@ -38,14 +44,18 @@ const BYPASS_RESULT: MixerTickResult = { mixerAutoDb: null, mixerGainDb: null };
 // 1 tick 分の計測値で全タブのミキサーを更新して GainNode に反映し、tabId ごとの表示用の値を返す。
 // 中央値は全タブの音量から求めるため、タブごとではなく全タブ分をまとめて処理する。
 // 1. コンプレッサー ON の各タブで、揃える音量 (バランス基準の音量) の平均を更新する
-// 2. ON のタブ全体で自動補正を求める。結果に含まれない (音が出ていない) タブは前回値を保持する
+// 2. ON のタブ全体で自動補正を求める。結果に含まれないタブ (比べる相手の音が出ていない間など) は
+//    前回値を据え置く。ON のタブが 1 つだけになったときは、結果の 0 で補正を外す
 // 3. ON の各タブで、自動補正 (自動追従 ON のとき) + 手動オフセットを mixerGain に毎 tick 反映する
-// 4. bypass のタブはミキサーが経路に無いので計算せず、表示用の値は null にする
+// 4. bypass のタブは自動補正を計算せず、表示用の値は null にする。ただし mixerGain は経路に無くても
+//    手動オフセットだけの値に毎 tick 保つ。ON に戻したとき (自動補正は 0 から始め直す) に、
+//    GainNode が古い補正の値から時定数をかけて移る間だけ意図しない音量になるのを防ぐため
 // 自動追従 OFF の間も 1・2 は続ける。ON に戻したときにすぐ補正を始められるようにするため。
 export const runMixerTick = (
   inputs: readonly MixerTickInput[],
   dtSec: number,
 ): Map<number, MixerTickResult> => {
+  const { autoBalance } = mixerSettings;
   const enabledInputs = inputs.filter(({ entry }) => entry.graph.enabled);
 
   for (const { entry, levels, autoMakeupDb } of enabledInputs) {
@@ -78,17 +88,19 @@ export const runMixerTick = (
     const mixerGainDb = computeMixerGainDb(
       entry.autoBalanceGainDb,
       entry.mixerOffsetDb,
-      autoBalanceEnabled,
+      autoBalance,
     );
     setMixerGainDb(entry.graph, mixerGainDb, entry.graph.compressor.context.currentTime);
     results.set(entry.tabId, {
-      mixerAutoDb: autoBalanceEnabled ? entry.autoBalanceGainDb : null,
+      mixerAutoDb: autoBalance ? entry.autoBalanceGainDb : null,
       mixerGainDb,
     });
   }
 
   for (const { entry } of inputs) {
-    if (!entry.graph.enabled) results.set(entry.tabId, BYPASS_RESULT);
+    if (entry.graph.enabled) continue;
+    setMixerGainDb(entry.graph, entry.mixerOffsetDb, entry.graph.compressor.context.currentTime);
+    results.set(entry.tabId, BYPASS_RESULT);
   }
   return results;
 };

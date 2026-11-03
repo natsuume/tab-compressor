@@ -11,7 +11,7 @@ import { normalizeCompressorParams, type CompressorParams } from '@/shared/compr
 import { DEFAULT_PRESET, DEFAULT_PRESET_ID } from '@/shared/presets';
 import { loadUserPresets } from '@/shared/user-presets';
 import { decideAutoEnableState, loadAutoEnableSettings } from '@/shared/auto-enable-settings';
-import { loadMixerSettings } from '@/shared/mixer-settings';
+import { DEFAULT_MIXER_SETTINGS, loadMixerSettings } from '@/shared/mixer-settings';
 import {
   loadMixerOffsetDb,
   mixerOffsetStorageKey,
@@ -199,10 +199,10 @@ const loadMixerStreamState = async (tabId: number): Promise<MixerStreamState> =>
       loadMixerOffsetDb(tabId),
       loadMixerSettings(),
     ]);
-    return { offsetDb, autoBalance: settings.autoBalance };
+    return { offsetDb, settings };
   } catch (err) {
     console.warn('[tab-compressor] mixer state load failed', err);
-    return { offsetDb: 0, autoBalance: false };
+    return { offsetDb: 0, settings: DEFAULT_MIXER_SETTINGS };
   }
 };
 
@@ -409,7 +409,7 @@ chrome.runtime.onMessage.addListener((raw, _sender, sendResponse) => {
       // 保存済みの設定が渡る)。設定を送るためだけに Offscreen を作らないよう、先に存在を確かめる。
       if (raw.type === 'UPDATE_MIXER_SETTINGS') {
         if (await chrome.offscreen.hasDocument()) {
-          await sendToOffscreen({ type: 'SET_AUTO_BALANCE', autoBalance: raw.settings.autoBalance });
+          await sendToOffscreen({ type: 'SET_MIXER_SETTINGS', settings: raw.settings });
         }
         return { ok: true };
       }

@@ -1,5 +1,6 @@
 import { isMsg, OFFSCREEN_NO_GRAPH_ERROR, OFFSCREEN_TARGET } from '@/shared/messages';
 import { normalizeCompressorParams } from '@/shared/compressor-params';
+import { normalizeMixerSettings } from '@/shared/mixer-settings';
 import { normalizeMixerOffsetDb } from '@/shared/tab-mixer';
 import {
   removeTab,
@@ -9,7 +10,7 @@ import {
   stopMonitoringTab,
   updateTabParams,
 } from './graph-registry';
-import { setAutoBalanceEnabled } from './mixer-controller';
+import { applyMixerSettings } from './mixer-controller';
 import { startProcessingLoop } from './processing-loop';
 
 type TargetedEnvelope = { target?: unknown };
@@ -27,8 +28,8 @@ chrome.runtime.onMessage.addListener((raw, _sender, sendResponse) => {
 
   const handle = async (): Promise<{ ok: boolean; error?: string }> => {
     try {
-      // 受け取った params とミキサーのオフセットは registry に渡す前に正規化する。保存済みの
-      // TabState に autoMakeup などのフィールドが無い場合でも、補完値で処理できるようにするため。
+      // 受け取った params とミキサーのオフセット・設定は、使う前に正規化する。保存済みの
+      // TabState などにフィールドが無い場合でも、補完値で処理できるようにするため。
       switch (raw.type) {
         case 'SET_STREAM':
           await setStreamForTab(
@@ -38,7 +39,7 @@ chrome.runtime.onMessage.addListener((raw, _sender, sendResponse) => {
             raw.enabled,
             normalizeMixerOffsetDb(raw.mixer.offsetDb),
           );
-          setAutoBalanceEnabled(raw.mixer.autoBalance);
+          applyMixerSettings(normalizeMixerSettings(raw.mixer.settings));
           startProcessingLoop();
           return { ok: true };
         case 'SET_ENABLED':
@@ -56,8 +57,8 @@ chrome.runtime.onMessage.addListener((raw, _sender, sendResponse) => {
             return { ok: false, error: OFFSCREEN_NO_GRAPH_ERROR };
           }
           return { ok: true };
-        case 'SET_AUTO_BALANCE':
-          setAutoBalanceEnabled(raw.autoBalance);
+        case 'SET_MIXER_SETTINGS':
+          applyMixerSettings(normalizeMixerSettings(raw.settings));
           return { ok: true };
         case 'STOP_MONITOR':
           stopMonitoringTab(raw.tabId);

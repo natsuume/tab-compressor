@@ -1,8 +1,8 @@
 import type { CompressorParams } from './compressor-params';
 import type { MixerSettings } from './mixer-settings';
 
-// SET_STREAM でグラフと一緒に渡す、そのタブのミキサーの状態。
-export type MixerStreamState = { offsetDb: number; autoBalance: boolean };
+// SET_STREAM でグラフと一緒に渡す、そのタブの手動オフセットと全タブ共通のミキサー設定。
+export type MixerStreamState = { offsetDb: number; settings: MixerSettings };
 
 export type Msg =
   | { type: 'ENABLE_TAB'; tabId: number; params: CompressorParams }
@@ -18,10 +18,10 @@ export type Msg =
   | { type: 'GRAPH_LOST'; tabId: number }
   // popup → SW: 手動オフセットを storage に保存した後に送る。SW → Offscreen: 同じ型でグラフに反映させる
   | { type: 'UPDATE_MIXER_OFFSET'; tabId: number; offsetDb: number }
-  // popup → SW: ミキサー設定を storage に保存した後に送る
+  // popup → SW: ミキサー設定 (保存時刻付き) を storage に保存した後に送る
   | { type: 'UPDATE_MIXER_SETTINGS'; settings: MixerSettings }
-  // SW → Offscreen: 自動追従の ON / OFF を全タブのミキサーに反映させる
-  | { type: 'SET_AUTO_BALANCE'; autoBalance: boolean }
+  // SW → Offscreen: ミキサー設定を全タブのミキサーに反映させる。Offscreen は保存時刻の新しい方だけを採る
+  | { type: 'SET_MIXER_SETTINGS'; settings: MixerSettings }
   | { type: 'PING_OFFSCREEN' };
 
 export type MsgType = Msg['type'];

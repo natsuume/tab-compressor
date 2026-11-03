@@ -3,6 +3,8 @@ import { clampDb, meanSquareToDb } from './level-math';
 
 // ミキサー: コンプレッサー ON のタブのうち「音が出ている」タブの音量の中央値に、各タブの音量を寄せる。
 // 中央値を基準にすることで、1 つだけ極端に大きい (または小さい) タブに全体の基準が引っ張られない。
+// 比べる相手がいない間は自動補正を動かさない。ON のタブが 1 つだけなら補正を 0 に戻し、
+// 音が出ているタブが 1 つ以下の間は直前の補正を据え置く。
 // 各タブのミキサーゲイン = 自動補正 (自動追従 ON のとき) + 手動オフセット。
 // 自動追従 OFF のときは手動オフセットだけが掛かる、単純なタブ別ボリュームになる。
 // 揃える音量 (バランス基準の音量) には手動 Makeup を含めない。手動 Makeup は自動 Makeup と同じく
@@ -119,22 +121,33 @@ export type AutoBalanceInput = {
   sounding: boolean;
 };
 
-// 各タブの自動補正 (dB) を tabId → 補正値の Map で返す。
-// - 対象は sounding が true かつ loudnessDb が計測済みのタブ。対象だけで中央値 M を求める
-// - 対象の各タブに clamp(M - loudnessDb, config.minAutoGainDb, config.maxAutoGainDb) を割り当てる
-// - 対象外のタブは Map に含めない (呼び出し側が前回値を保持する)。対象が 0 件なら空の Map
+// 各タブの自動補正 (dB) を tabId → 補正値の Map で返す。tabs はコンプレッサー ON の全タブ。
+// Map に含めないタブは、呼び出し側が前回値を据え置く。上から順に判定する。
+// 1. tabs が 2 件未満なら、すべてのタブに 0 を割り当てる。比べる相手のタブが存在しないので
+//    補正しない (他のタブを閉じた・OFF にした後に補正が残らないようにする)
+// 2. 対象 (sounding が true かつ loudnessDb が計測済みのタブ) が 2 件未満なら、空の Map を返す
+//    (他のタブを一時停止しても、残ったタブの音量が跳ねないようにする)
+// 3. それ以外は対象だけで中央値 M を求め、対象の各タブに
+//    clamp(M - loudnessDb, config.minAutoGainDb, config.maxAutoGainDb) を割り当てる。
+//    対象外のタブは Map に含めない
 export const computeAutoBalanceGains = (
   tabs: readonly AutoBalanceInput[],
   config: MixerConfig = MIXER_CONFIG,
 ): Map<number, number> => {
+  const gains = new Map<number, number>();
+  if (tabs.length < 2) {
+    for (const tab of tabs) gains.set(tab.tabId, 0);
+    return gains;
+  }
+
   const targets: { tabId: number; loudnessDb: number }[] = [];
   for (const tab of tabs) {
     if (tab.sounding && tab.loudnessDb !== null) {
       targets.push({ tabId: tab.tabId, loudnessDb: tab.loudnessDb });
     }
   }
+  if (targets.length < 2) return gains;
 
-  const gains = new Map<number, number>();
   const median = computeMedian(targets.map((target) => target.loudnessDb));
   if (median === null) return gains;
   for (const target of targets) {
