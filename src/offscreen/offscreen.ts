@@ -1,4 +1,5 @@
 import { isMsg, OFFSCREEN_NO_GRAPH_ERROR, OFFSCREEN_TARGET } from '@/shared/messages';
+import { normalizeCompressorParams } from '@/shared/compressor-params';
 import {
   removeTab,
   setStreamForTab,
@@ -6,7 +7,7 @@ import {
   stopMonitoringTab,
   updateTabParams,
 } from './graph-registry';
-import { startBroadcasting } from './meter-broadcaster';
+import { startProcessingLoop } from './processing-loop';
 
 type TargetedEnvelope = { target?: unknown };
 
@@ -23,18 +24,25 @@ chrome.runtime.onMessage.addListener((raw, _sender, sendResponse) => {
 
   const handle = async (): Promise<{ ok: boolean; error?: string }> => {
     try {
+      // 受け取った params は registry に渡す前に正規化する。保存済みの TabState に
+      // autoMakeup などのフィールドが無い場合でも、補完値で処理できるようにするため。
       switch (raw.type) {
         case 'SET_STREAM':
-          await setStreamForTab(raw.tabId, raw.streamId, raw.params, raw.enabled);
-          startBroadcasting();
+          await setStreamForTab(
+            raw.tabId,
+            raw.streamId,
+            normalizeCompressorParams(raw.params),
+            raw.enabled,
+          );
+          startProcessingLoop();
           return { ok: true };
         case 'SET_ENABLED':
-          if (!setTabEnabled(raw.tabId, raw.enabled, raw.params)) {
+          if (!setTabEnabled(raw.tabId, raw.enabled, normalizeCompressorParams(raw.params))) {
             return { ok: false, error: OFFSCREEN_NO_GRAPH_ERROR };
           }
           return { ok: true };
         case 'UPDATE_PARAMS':
-          if (!updateTabParams(raw.tabId, raw.params)) {
+          if (!updateTabParams(raw.tabId, normalizeCompressorParams(raw.params))) {
             return { ok: false, error: OFFSCREEN_NO_GRAPH_ERROR };
           }
           return { ok: true };

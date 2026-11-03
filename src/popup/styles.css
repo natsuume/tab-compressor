@@ -292,6 +292,37 @@ h3 {
   cursor: not-allowed;
 }
 
+/* スライダーの行 (.parameter-slider) と同じ 3 列 (ラベル / 操作 / 値) に揃える。 */
+.parameter-toggle {
+  display: grid;
+  grid-template-columns: 72px 1fr 60px;
+  align-items: center;
+  gap: 8px;
+}
+
+.parameter-toggle[data-disabled='true'] {
+  opacity: 0.5;
+}
+
+.parameter-toggle__control {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 12px;
+  min-width: 0;
+  overflow-wrap: anywhere;
+  cursor: pointer;
+}
+
+.parameter-toggle__control input {
+  margin: 0;
+  accent-color: var(--color-accent);
+}
+
+.parameter-toggle__control input[aria-disabled='true'] {
+  cursor: not-allowed;
+}
+
 /* Presets セクション内で、上のチップ列 (このタブに適用) と区切り線で分ける。 */
 .auto-enable-panel {
   display: flex;
@@ -398,4 +429,17 @@ h3 {
 .warning-text {
   color: var(--color-warn);
   font-size: 11px;
+}
+
+/* 画面には表示せず、スクリーンリーダーにだけ読ませるテキスト。 */
+.visually-hidden {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip: rect(0 0 0 0);
+  white-space: nowrap;
+  margin: -1px;
+  padding: 0;
+  border: 0;
 }

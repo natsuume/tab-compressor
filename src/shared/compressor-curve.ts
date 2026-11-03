@@ -47,6 +47,9 @@ const kAtSlope = (
   return k;
 };
 
+// カーブの形を決めるパラメータ。attack / release などの時間特性は静的カーブに影響しない。
+export type CurveShapeParams = Pick<CompressorParams, 'threshold' | 'knee' | 'ratio'>;
+
 type CurveModel = {
   linearThreshold: number;
   kneeThresholdDb: number;
@@ -58,7 +61,7 @@ type CurveModel = {
   slope: number;
 };
 
-const buildCurveModel = (params: CompressorParams): CurveModel => {
+const buildCurveModel = (params: CurveShapeParams): CurveModel => {
   const { threshold, knee, ratio } = params;
   const linearThreshold = dbToLinear(threshold);
   const kneeThresholdDb = threshold + knee;
@@ -81,7 +84,7 @@ const saturate = (x: number, model: CurveModel): number => {
 const computeOutputDbWithModel = (inputDb: number, model: CurveModel): number =>
   linearToDb(saturate(dbToLinear(inputDb), model));
 
-export const computeOutputDb = (inputDb: number, params: CompressorParams): number =>
+export const computeOutputDb = (inputDb: number, params: CurveShapeParams): number =>
   computeOutputDbWithModel(inputDb, buildCurveModel(params));
 
 export type CurvePoint = { inputDb: number; outputDb: number };
@@ -106,7 +109,7 @@ export const generateCurvePoints = (
 // threshold 以下の信号を素通しに近づける。
 const CHROME_MAKEUP_EXPONENT = 0.6;
 
-export const estimateAutoMakeupCompensationDb = (params: CompressorParams): number => {
+export const estimateAutoMakeupCompensationDb = (params: CurveShapeParams): number => {
   if (params.ratio <= 1) return 0;
   const fullRangeGainDb = linearToDb(saturate(1, buildCurveModel(params)));
   return CHROME_MAKEUP_EXPONENT * fullRangeGainDb;
