@@ -1,3 +1,5 @@
+import { clampDb, meanSquareToDb } from './level-math';
+
 // 自動 Makeup: 入力 (compressor 手前) と出力の音量が一致するように、
 // compressor で下がった分の音量を補うゲインを計測値から逐次算出する。
 // 出力 = compressor 出力 × 静的補正 × 手動 Makeup × 自動ゲイン なので、
@@ -52,12 +54,14 @@ export type AutoMakeupMeasurement = {
 // - それ以外は previous + (sample - previous) * (1 - exp(-dtSec / timeConstantSec))
 //   (dtSec が timeConstantSec に等しいとき、previous から sample へ約 63.2% 進む)
 export const updateExponentialAverage = (
-  _previous: number | null,
-  _sample: number,
-  _dtSec: number,
-  _timeConstantSec: number,
+  previous: number | null,
+  sample: number,
+  dtSec: number,
+  timeConstantSec: number,
 ): number => {
-  throw new Error('not implemented');
+  if (previous === null) return sample;
+  if (dtSec <= 0) return previous;
+  return previous + (sample - previous) * (1 - Math.exp(-dtSec / timeConstantSec));
 };
 
 // 計測値 1 ブロック分で自動 Makeup の状態を更新し、新しい状態オブジェクトを返す (引数は変更しない)。
@@ -73,9 +77,23 @@ export const updateExponentialAverage = (
 //    平均した後に clamp するので、上限・下限に張り付いている間も内部値が際限なく伸びず、
 //    残差が戻ればすぐに上限・下限から離れ始める。
 export const stepAutoMakeup = (
-  _state: AutoMakeupState,
-  _measurement: AutoMakeupMeasurement,
-  _config: AutoMakeupConfig = AUTO_MAKEUP_CONFIG,
+  state: AutoMakeupState,
+  measurement: AutoMakeupMeasurement,
+  config: AutoMakeupConfig = AUTO_MAKEUP_CONFIG,
 ): AutoMakeupState => {
-  throw new Error('not implemented');
+  const inputDb = meanSquareToDb(measurement.inputMeanSquare);
+  if (inputDb < config.gateDb) return state;
+  if (measurement.compressedMeanSquare <= 0) return state;
+
+  const residualDb =
+    inputDb
+    - meanSquareToDb(measurement.compressedMeanSquare)
+    - measurement.staticCompensationDb;
+  const averagedDb = updateExponentialAverage(
+    state.gainDb,
+    residualDb,
+    measurement.dtSec,
+    config.timeConstantSec,
+  );
+  return { gainDb: clampDb(averagedDb, config.minGainDb, config.maxGainDb) };
 };

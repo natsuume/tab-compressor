@@ -12,4 +12,8 @@ export const OFFSCREEN_DOCUMENT_URL = 'src/offscreen/offscreen.html';
 
 export const PARAM_SMOOTHING_TIME_CONSTANT = 0.02;
 
+// 自動 Makeup のゲインを GainNode に反映するときの時定数 (秒)。
+// 処理ループの tick ごとに目標値が変わるため、tick 間の段差を均す。
+export const AUTO_MAKEUP_APPLY_SMOOTHING_SEC = 0.1;
+
 export const DB_FLOOR = -100;

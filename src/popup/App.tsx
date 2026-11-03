@@ -145,6 +145,7 @@ export const App = () => {
           <ParameterPanel
             params={state.params}
             disabled={controlsDisabled}
+            autoMakeupDb={meters.autoMakeupDb}
             onChange={handleParamsChange}
           />
         </section>

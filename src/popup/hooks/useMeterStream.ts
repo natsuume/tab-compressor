@@ -1,13 +1,8 @@
 import { useEffect, useRef, useState } from 'react';
 import { BROADCAST_CHANNEL_METERS, DB_FLOOR } from '@/shared/constants';
+import type { MeterBatch, MeterSample } from '@/shared/meter-sample';
 
-export type MeterValues = {
-  inRmsDb: number;
-  inPeakDb: number;
-  outRmsDb: number;
-  outPeakDb: number;
-  reductionDb: number;
-};
+export type MeterValues = Omit<MeterSample, 'tabId'>;
 
 const EMPTY_METERS: MeterValues = {
   inRmsDb: DB_FLOOR,
@@ -15,10 +10,8 @@ const EMPTY_METERS: MeterValues = {
   outRmsDb: DB_FLOOR,
   outPeakDb: DB_FLOOR,
   reductionDb: 0,
+  autoMakeupDb: null,
 };
-
-type MeterSample = MeterValues & { tabId: number };
-type MeterBatch = { timestamp: number; samples: MeterSample[] };
 
 export const useMeterStream = (tabId: number | null): MeterValues => {
   const [values, setValues] = useState<MeterValues>(EMPTY_METERS);
@@ -39,6 +32,7 @@ export const useMeterStream = (tabId: number | null): MeterValues => {
         outRmsDb: sample.outRmsDb,
         outPeakDb: sample.outPeakDb,
         reductionDb: sample.reductionDb,
+        autoMakeupDb: sample.autoMakeupDb,
       };
     };
 

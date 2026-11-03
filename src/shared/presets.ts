@@ -20,6 +20,7 @@ const QUIET_PRESET: Preset = {
     attackMs: 5,
     releaseMs: 100,
     manualMakeupGainDb: -4,
+    autoMakeup: false,
   },
 };
 

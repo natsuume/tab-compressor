@@ -1,4 +1,5 @@
 import type { CompressorParams } from '@/shared/compressor-params';
+import { INITIAL_AUTO_MAKEUP_STATE, type AutoMakeupState } from '@/shared/auto-makeup';
 import {
   applyParams,
   buildConstraintsForTabStream,
@@ -8,7 +9,14 @@ import {
   type AudioGraph,
 } from './audio-graph';
 
-type RegistryEntry = { tabId: number; graph: AudioGraph };
+// タブ 1 つ分のグラフと、そのタブに適用中の params・自動 Makeup の状態。
+// 処理ループが毎 tick autoMakeupState を書き換える可変オブジェクト。
+export type RegistryEntry = {
+  tabId: number;
+  graph: AudioGraph;
+  params: CompressorParams;
+  autoMakeupState: AutoMakeupState;
+};
 
 let audioContext: AudioContext | null = null;
 const entries = new Map<number, RegistryEntry>();
@@ -69,13 +77,19 @@ export const setStreamForTab = async (
   }
   const stream = await captureStream(streamId);
   const graph = createAudioGraph(getAudioContext(), stream, params, enabled);
-  entries.set(tabId, { tabId, graph });
+  entries.set(tabId, { tabId, graph, params, autoMakeupState: INITIAL_AUTO_MAKEUP_STATE });
   watchStreamLifecycle(tabId, graph);
 };
 
+// 自動 Makeup の GainNode への反映は処理ループが毎 tick 行うため、ここでは状態の更新のみ行う。
 export const updateTabParams = (tabId: number, params: CompressorParams): boolean => {
   const entry = entries.get(tabId);
   if (entry === undefined) return false;
+  // 自動 Makeup を切り替えたときは、前回の動作中に追従したゲインを持ち越さない。
+  if (entry.params.autoMakeup !== params.autoMakeup) {
+    entry.autoMakeupState = INITIAL_AUTO_MAKEUP_STATE;
+  }
+  entry.params = params;
   applyParams(entry.graph, params, getAudioContext().currentTime);
   return true;
 };
@@ -87,6 +101,12 @@ export const setTabEnabled = (
 ): boolean => {
   const entry = entries.get(tabId);
   if (entry === undefined) return false;
+  // コンプレッサーの ON / OFF を切り替えたときは、自動 Makeup を初期状態から始め直す。
+  // setGraphEnabled が graph.enabled を書き換えるため、その前に判定する。
+  if (entry.graph.enabled !== enabled) {
+    entry.autoMakeupState = INITIAL_AUTO_MAKEUP_STATE;
+  }
+  entry.params = params;
   setGraphEnabled(entry.graph, enabled, params, getAudioContext().currentTime);
   return true;
 };

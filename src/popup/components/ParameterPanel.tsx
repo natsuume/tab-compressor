@@ -1,14 +1,17 @@
-import type { CompressorParams } from '@/shared/compressor-params';
+import type { CompressorParams, NumericCompressorParamKey } from '@/shared/compressor-params';
 import { PARAM_LABELS, PARAM_RANGES } from '@/shared/compressor-params';
 import { ParameterSlider } from './ParameterSlider';
+import { AutoMakeupToggle } from './AutoMakeupToggle';
 
 type ParameterPanelProps = {
   params: CompressorParams;
   disabled?: boolean;
+  // 現在の自動ゲイン (dB)。自動 Makeup が動作していないときは null
+  autoMakeupDb: number | null;
   onChange: (params: CompressorParams) => void;
 };
 
-const PRECISION: Record<keyof CompressorParams, number> = {
+const PRECISION: Record<NumericCompressorParamKey, number> = {
   threshold: 1,
   knee: 1,
   ratio: 1,
@@ -17,8 +20,13 @@ const PRECISION: Record<keyof CompressorParams, number> = {
   manualMakeupGainDb: 1,
 };
 
-export const ParameterPanel = ({ params, disabled = false, onChange }: ParameterPanelProps) => {
-  const keys = Object.keys(PARAM_RANGES) as Array<keyof CompressorParams>;
+export const ParameterPanel = ({
+  params,
+  disabled = false,
+  autoMakeupDb,
+  onChange,
+}: ParameterPanelProps) => {
+  const keys = Object.keys(PARAM_RANGES) as NumericCompressorParamKey[];
   return (
     <div className="parameter-panel">
       {keys.map((key) => {
@@ -38,6 +46,12 @@ export const ParameterPanel = ({ params, disabled = false, onChange }: Parameter
           />
         );
       })}
+      <AutoMakeupToggle
+        checked={params.autoMakeup}
+        disabled={disabled}
+        autoMakeupDb={autoMakeupDb}
+        onChange={(next) => onChange({ ...params, autoMakeup: next })}
+      />
     </div>
   );
 };
