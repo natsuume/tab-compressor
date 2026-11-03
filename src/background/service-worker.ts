@@ -6,12 +6,8 @@ import {
 } from '@/shared/messages';
 import { MONITOR_PORT_PREFIX } from '@/shared/constants';
 import { tabStorageKey, type TabState } from '@/shared/tab-state';
-import {
-  DEFAULT_PARAMS,
-  normalizeCompressorParams,
-  type CompressorParams,
-} from '@/shared/compressor-params';
-import { DEFAULT_PRESET_ID } from '@/shared/presets';
+import { normalizeCompressorParams, type CompressorParams } from '@/shared/compressor-params';
+import { DEFAULT_PRESET, DEFAULT_PRESET_ID } from '@/shared/presets';
 import { loadUserPresets } from '@/shared/user-presets';
 import { decideAutoEnableState, loadAutoEnableSettings } from '@/shared/auto-enable-settings';
 import { ensureOffscreenDocument } from './offscreen-manager';
@@ -160,15 +156,22 @@ const saveTabState = async (tabId: number, state: TabState): Promise<void> => {
 // ON にする場合は保存すべき TabState、しない場合は null を返す。
 // TabState があるタブ (一度でも操作したタブ) は判定するまでもなく対象外なので、
 // 設定と My Presets の読み込みを省く。
+// 読み込みに失敗した場合は自動有効化しない扱いで null を返す。例外を投げると
+// MONITOR_TAB のメーター用 attach まで止まってしまうため。
 const loadAutoEnableStateForUntouchedTab = async (
   prev: TabState | undefined,
 ): Promise<TabState | null> => {
   if (prev !== undefined) return null;
-  const [settings, userPresets] = await Promise.all([
-    loadAutoEnableSettings(),
-    loadUserPresets(),
-  ]);
-  return decideAutoEnableState(prev, settings, userPresets);
+  try {
+    const [settings, userPresets] = await Promise.all([
+      loadAutoEnableSettings(),
+      loadUserPresets(),
+    ]);
+    return decideAutoEnableState(prev, settings, userPresets);
+  } catch (err) {
+    console.warn('[tab-compressor] auto-enable settings load failed', err);
+    return null;
+  }
 };
 
 // 既存グラフがあれば経路切替のみ、なければタブキャプチャから構築。
@@ -374,12 +377,18 @@ chrome.runtime.onMessage.addListener((raw, _sender, sendResponse) => {
           case 'ENABLE_TAB': {
             // attach が成功してから storage を更新する (失敗時に UI=ON / 圧縮なし
             // の不整合を起こさないため)。
+            // MONITOR_TAB の自動有効化が attach している間も popup の ON ボタンは押せるため、
+            // ENABLE_TAB がロック待ちの後に届くことがある。そのとき raw.params は popup が
+            // 持つ古い既定値なので、既に ON になっている TabState の presetId と組み合わせると
+            // presetId と params が食い違う。既に ON なら保存済みの params を使う。
             const prev = await loadTabState(raw.tabId);
-            await attachOrToggleGraph(raw.tabId, raw.params, true);
+            const params =
+              prev?.enabled === true ? normalizeCompressorParams(prev.params) : raw.params;
+            await attachOrToggleGraph(raw.tabId, params, true);
             const next: TabState = {
               enabled: true,
               presetId: prev?.presetId ?? DEFAULT_PRESET_ID,
-              params: raw.params,
+              params,
             };
             await saveTabState(raw.tabId, next);
             clearAutoOffBadge(raw.tabId);
@@ -391,7 +400,7 @@ chrome.runtime.onMessage.addListener((raw, _sender, sendResponse) => {
             // graph は圧縮中」となり、その後の popup クローズで stopMonitoringIfBypass が
             // enabled な graph を残したまま cache だけ消す orphan 経路になる。
             const prev = await loadTabState(raw.tabId);
-            const params = prev?.params ?? DEFAULT_PARAMS;
+            const params = prev?.params ?? DEFAULT_PRESET.params;
             if (await isMonitoredTab(raw.tabId)) {
               await sendOrCleanupOnMissingGraph(raw.tabId, {
                 type: 'SET_ENABLED',

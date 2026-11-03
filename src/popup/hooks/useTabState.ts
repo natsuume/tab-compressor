@@ -1,13 +1,13 @@
 import { useCallback, useEffect, useState } from 'react';
 import type { Msg } from '@/shared/messages';
-import { DEFAULT_PARAMS, normalizeCompressorParams } from '@/shared/compressor-params';
-import { DEFAULT_PRESET_ID } from '@/shared/presets';
+import { normalizeCompressorParams } from '@/shared/compressor-params';
+import { DEFAULT_PRESET, DEFAULT_PRESET_ID } from '@/shared/presets';
 import { tabStorageKey, type TabState } from '@/shared/tab-state';
 
 const createDefaultState = (): TabState => ({
   enabled: false,
   presetId: DEFAULT_PRESET_ID,
-  params: DEFAULT_PARAMS,
+  params: DEFAULT_PRESET.params,
 });
 
 const normalizeTabState = (raw: TabState | undefined): TabState => {

@@ -1,7 +1,7 @@
 import type { CompressorParams } from './compressor-params';
-import { DEFAULT_PRESET_ID, type PresetId } from './presets';
+import { DEFAULT_PRESET_ID, findPreset, isPresetId, type PresetId } from './presets';
 import type { TabState } from './tab-state';
-import type { UserPreset, UserPresetId } from './user-presets';
+import { isUserPresetId, type UserPreset, type UserPresetId } from './user-presets';
 
 // 自動有効化で適用するプリセットの参照。組み込みプリセットと My Presets の両方を指せる。
 export type AutoEnablePresetRef = PresetId | UserPresetId;
@@ -34,25 +34,44 @@ export type ResolvedPreset = {
 // - presetId が「組み込みプリセットの id」か「My Presets 形式の id (user_ 接頭辞)」でなければ
 //   DEFAULT_AUTO_ENABLE_SETTINGS.presetId を使う
 // My Presets 側で削除済みかどうかはここでは判定しない (resolvePresetRef が判定する)。
-export const normalizeAutoEnableSettings = (_raw: unknown): AutoEnableSettings =>
-  DEFAULT_AUTO_ENABLE_SETTINGS;
+export const normalizeAutoEnableSettings = (raw: unknown): AutoEnableSettings => {
+  if (typeof raw !== 'object' || raw === null) return DEFAULT_AUTO_ENABLE_SETTINGS;
+  const enabled = 'enabled' in raw ? raw.enabled : undefined;
+  const presetId = 'presetId' in raw ? raw.presetId : undefined;
+  return {
+    enabled: typeof enabled === 'boolean' ? enabled : DEFAULT_AUTO_ENABLE_SETTINGS.enabled,
+    presetId:
+      typeof presetId === 'string' && (isPresetId(presetId) || isUserPresetId(presetId))
+        ? presetId
+        : DEFAULT_AUTO_ENABLE_SETTINGS.presetId,
+  };
+};
 
 // chrome.storage.local から設定を読み込む。未保存なら DEFAULT_AUTO_ENABLE_SETTINGS。
-export const loadAutoEnableSettings = (): Promise<AutoEnableSettings> =>
-  Promise.resolve(DEFAULT_AUTO_ENABLE_SETTINGS);
+export const loadAutoEnableSettings = async (): Promise<AutoEnableSettings> => {
+  const result = await chrome.storage.local.get(AUTO_ENABLE_SETTINGS_STORAGE_KEY);
+  return normalizeAutoEnableSettings(result[AUTO_ENABLE_SETTINGS_STORAGE_KEY]);
+};
 
 // chrome.storage.local に設定を保存する。
-export const saveAutoEnableSettings = (_settings: AutoEnableSettings): Promise<void> =>
-  Promise.resolve();
+export const saveAutoEnableSettings = async (settings: AutoEnableSettings): Promise<void> => {
+  await chrome.storage.local.set({ [AUTO_ENABLE_SETTINGS_STORAGE_KEY]: settings });
+};
 
 // プリセット参照を id と params の組に解決する。
 // - 組み込みプリセットの id: PRESETS から探す
 // - My Presets の id: userPresets から探す
 // 参照先が見つからない (削除済みの My Preset 等) 場合は null。
 export const resolvePresetRef = (
-  _ref: AutoEnablePresetRef,
-  _userPresets: readonly UserPreset[],
-): ResolvedPreset | null => null;
+  ref: AutoEnablePresetRef,
+  userPresets: readonly UserPreset[],
+): ResolvedPreset | null => {
+  const found = isUserPresetId(ref)
+    ? userPresets.find((preset) => preset.id === ref)
+    : findPreset(ref);
+  if (found === undefined) return null;
+  return { presetId: found.id, params: found.params };
+};
 
 // popup を開いたタブを自動で ON にするかを判断する。
 // ON にする場合は保存すべき TabState (enabled=true + 解決したプリセットの presetId / params) を返し、
@@ -62,7 +81,13 @@ export const resolvePresetRef = (
 // - settings.enabled が false
 // - settings.presetId の参照先が見つからない。補完値で ON にはしない
 export const decideAutoEnableState = (
-  _prev: TabState | undefined,
-  _settings: AutoEnableSettings,
-  _userPresets: readonly UserPreset[],
-): TabState | null => null;
+  prev: TabState | undefined,
+  settings: AutoEnableSettings,
+  userPresets: readonly UserPreset[],
+): TabState | null => {
+  if (prev !== undefined) return null;
+  if (!settings.enabled) return null;
+  const resolved = resolvePresetRef(settings.presetId, userPresets);
+  if (resolved === null) return null;
+  return { enabled: true, presetId: resolved.presetId, params: resolved.params };
+};
