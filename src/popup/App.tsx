@@ -11,7 +11,6 @@ import { useUserPresets } from './hooks/useUserPresets';
 import { useAutoEnableSettings } from './hooks/useAutoEnableSettings';
 import { PowerToggle } from './components/PowerToggle';
 import { PresetSelector } from './components/PresetSelector';
-import { UserPresetList } from './components/UserPresetList';
 import { ParameterPanel } from './components/ParameterPanel';
 import { LevelMeters } from './components/LevelMeters';
 import { CompressorCurveChart } from './components/CompressorCurveChart';
@@ -113,66 +112,42 @@ export const App = () => {
 
       {tabId === null && <p className="warning-text">アクティブなタブを取得できません。</p>}
 
-      <div className="app__presets">
-        <section className="section">
-          <span className="section__heading">Preset</span>
-          <PresetSelector
-            activeId={state.presetId}
-            disabled={controlsDisabled}
-            onSelect={handleBuiltinPresetSelect}
-          />
-        </section>
+      <section className="section">
+        <span className="section__heading">Presets</span>
+        <PresetSelector
+          userPresets={userPresets.presets}
+          activeId={state.presetId}
+          disabled={controlsDisabled}
+          onSelectBuiltin={handleBuiltinPresetSelect}
+          onSelectUser={handleUserPresetSelect}
+          onRemoveUser={handleUserPresetRemove}
+          onSaveCurrent={handleSaveCurrent}
+        />
+        {/* 全タブ共通の設定でタブの ON / OFF とは無関係なので、controlsDisabled では無効化しない */}
+        <AutoEnableSettingsPanel
+          settings={autoEnableSettings}
+          userPresets={userPresets.presets}
+          isReady={isAutoEnableReady && userPresets.isReady}
+          onChange={handleAutoEnableChange}
+        />
+      </section>
 
-        <section className="section">
-          <span className="section__heading">My Presets</span>
-          <UserPresetList
-            presets={userPresets.presets}
-            activeId={state.presetId}
-            disabled={controlsDisabled}
-            onSelect={handleUserPresetSelect}
-            onRemove={handleUserPresetRemove}
-            onSaveCurrent={handleSaveCurrent}
-          />
-        </section>
-      </div>
-
+      {/* 同じ行の 2 枚は高さを揃える (Parameters 側がスライダーの間隔で吸収する) */}
       <div className="app__body">
-        <div className="app__visual">
-          <section className="section">
-            <span className="section__heading">Curve</span>
-            <CompressorCurveChart params={state.params} inputDb={meters.inRmsDb} />
-          </section>
+        <section className="section">
+          <span className="section__heading">Monitor</span>
+          <CompressorCurveChart params={state.params} inputDb={meters.inRmsDb} />
+          <LevelMeters values={meters} />
+        </section>
 
-          <section className="section">
-            <span className="section__heading">Levels</span>
-            <LevelMeters values={meters} />
-            {!state.enabled && (
-              <p className="info-text">OFF 中は入力レベルのみ計測しています (コンプレッサー無効)。</p>
-            )}
-          </section>
-        </div>
-
-        <div className="app__settings">
-          <section className="section">
-            <span className="section__heading">Parameters</span>
-            <ParameterPanel
-              params={state.params}
-              disabled={controlsDisabled}
-              onChange={handleParamsChange}
-            />
-          </section>
-
-          {/* 全タブ共通の設定でタブの ON / OFF とは無関係なので、controlsDisabled では無効化しない */}
-          <section className="section">
-            <span className="section__heading">Auto Enable</span>
-            <AutoEnableSettingsPanel
-              settings={autoEnableSettings}
-              userPresets={userPresets.presets}
-              isReady={isAutoEnableReady && userPresets.isReady}
-              onChange={handleAutoEnableChange}
-            />
-          </section>
-        </div>
+        <section className="section">
+          <span className="section__heading">Parameters</span>
+          <ParameterPanel
+            params={state.params}
+            disabled={controlsDisabled}
+            onChange={handleParamsChange}
+          />
+        </section>
       </div>
     </div>
   );
