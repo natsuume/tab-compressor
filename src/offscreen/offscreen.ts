@@ -1,12 +1,15 @@
 import { isMsg, OFFSCREEN_NO_GRAPH_ERROR, OFFSCREEN_TARGET } from '@/shared/messages';
 import { normalizeCompressorParams } from '@/shared/compressor-params';
+import { normalizeMixerOffsetDb } from '@/shared/tab-mixer';
 import {
   removeTab,
   setStreamForTab,
   setTabEnabled,
+  setTabMixerOffset,
   stopMonitoringTab,
   updateTabParams,
 } from './graph-registry';
+import { setAutoBalanceEnabled } from './mixer-controller';
 import { startProcessingLoop } from './processing-loop';
 
 type TargetedEnvelope = { target?: unknown };
@@ -24,8 +27,8 @@ chrome.runtime.onMessage.addListener((raw, _sender, sendResponse) => {
 
   const handle = async (): Promise<{ ok: boolean; error?: string }> => {
     try {
-      // 受け取った params は registry に渡す前に正規化する。保存済みの TabState に
-      // autoMakeup などのフィールドが無い場合でも、補完値で処理できるようにするため。
+      // 受け取った params とミキサーのオフセットは registry に渡す前に正規化する。保存済みの
+      // TabState に autoMakeup などのフィールドが無い場合でも、補完値で処理できるようにするため。
       switch (raw.type) {
         case 'SET_STREAM':
           await setStreamForTab(
@@ -33,7 +36,9 @@ chrome.runtime.onMessage.addListener((raw, _sender, sendResponse) => {
             raw.streamId,
             normalizeCompressorParams(raw.params),
             raw.enabled,
+            normalizeMixerOffsetDb(raw.mixer.offsetDb),
           );
+          setAutoBalanceEnabled(raw.mixer.autoBalance);
           startProcessingLoop();
           return { ok: true };
         case 'SET_ENABLED':
@@ -45,6 +50,14 @@ chrome.runtime.onMessage.addListener((raw, _sender, sendResponse) => {
           if (!updateTabParams(raw.tabId, normalizeCompressorParams(raw.params))) {
             return { ok: false, error: OFFSCREEN_NO_GRAPH_ERROR };
           }
+          return { ok: true };
+        case 'UPDATE_MIXER_OFFSET':
+          if (!setTabMixerOffset(raw.tabId, normalizeMixerOffsetDb(raw.offsetDb))) {
+            return { ok: false, error: OFFSCREEN_NO_GRAPH_ERROR };
+          }
+          return { ok: true };
+        case 'SET_AUTO_BALANCE':
+          setAutoBalanceEnabled(raw.autoBalance);
           return { ok: true };
         case 'STOP_MONITOR':
           stopMonitoringTab(raw.tabId);

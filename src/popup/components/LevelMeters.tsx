@@ -1,5 +1,6 @@
 import { DB_FLOOR } from '@/shared/constants';
 import type { MeterValues } from '../hooks/useMeterStream';
+import { dbToMeterScale } from '../meter-scale';
 
 type LevelMetersProps = {
   values: MeterValues;
@@ -7,12 +8,6 @@ type LevelMetersProps = {
 
 const METER_MIN_DB = -60;
 const METER_MAX_DB = 0;
-
-const dbToScale = (db: number, min: number, max: number): number => {
-  if (db <= min) return 0;
-  if (db >= max) return 1;
-  return (db - min) / (max - min);
-};
 
 const formatDb = (db: number): string => {
   if (db <= DB_FLOOR) return '−∞';
@@ -30,7 +25,7 @@ const MeterRow = ({
 }) => {
   const scale = reduction
     ? Math.min(1, Math.max(0, -db / 20))
-    : dbToScale(db, METER_MIN_DB, METER_MAX_DB);
+    : dbToMeterScale(db, METER_MIN_DB, METER_MAX_DB);
   // scaleX で縮めるとグラデーションごと圧縮されて先端が常に終端色 (赤) になる。
   // グラデーションはバー全幅に固定し、clip-path で右から切り取って表示量を
   // 制御することで、先端の色が現在のレベルを表すようにする。

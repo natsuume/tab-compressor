@@ -2,6 +2,7 @@ import {
   isMsg,
   OFFSCREEN_NO_GRAPH_ERROR,
   OFFSCREEN_TARGET,
+  type MixerStreamState,
   type Msg,
 } from '@/shared/messages';
 import { MONITOR_PORT_PREFIX } from '@/shared/constants';
@@ -10,6 +11,14 @@ import { normalizeCompressorParams, type CompressorParams } from '@/shared/compr
 import { DEFAULT_PRESET, DEFAULT_PRESET_ID } from '@/shared/presets';
 import { loadUserPresets } from '@/shared/user-presets';
 import { decideAutoEnableState, loadAutoEnableSettings } from '@/shared/auto-enable-settings';
+import { loadMixerSettings } from '@/shared/mixer-settings';
+import {
+  loadMixerOffsetDb,
+  mixerOffsetStorageKey,
+  mixerTitleStorageKey,
+  normalizeMixerOffsetDb,
+  saveTabTitle,
+} from '@/shared/tab-mixer';
 import { ensureOffscreenDocument } from './offscreen-manager';
 import {
   clearManuallyDisabledTabs,
@@ -182,6 +191,35 @@ const loadAutoEnableStateForUntouchedTab = async (
   }
 };
 
+// SET_STREAM でグラフに渡すミキサーの状態 (タブの手動オフセットと全タブ共通の自動追従設定) を読む。
+// 読み込みに失敗しても attach は止めず、オフセット 0・自動追従 OFF で始める。
+const loadMixerStreamState = async (tabId: number): Promise<MixerStreamState> => {
+  try {
+    const [offsetDb, settings] = await Promise.all([
+      loadMixerOffsetDb(tabId),
+      loadMixerSettings(),
+    ]);
+    return { offsetDb, autoBalance: settings.autoBalance };
+  } catch (err) {
+    console.warn('[tab-compressor] mixer state load failed', err);
+    return { offsetDb: 0, autoBalance: false };
+  }
+};
+
+// popup を開いた時点のタブのタイトルを、ミキサーの一覧に表示するために記録する。
+// popup を開いている = activeTab が付与されているので、tabs 権限なしでタイトルを取得できる。
+// 一覧の表示のためだけの記録なので、失敗してもログだけ出す。
+const recordTabTitle = async (tabId: number): Promise<void> => {
+  try {
+    const tab = await chrome.tabs.get(tabId);
+    if (typeof tab.title === 'string' && tab.title.length > 0) {
+      await saveTabTitle(tabId, tab.title);
+    }
+  } catch (err) {
+    console.warn('[tab-compressor] tab title record failed', err);
+  }
+};
+
 // 既存グラフがあれば経路切替のみ、なければタブキャプチャから構築。
 // 同一 tabId 並行は withTabLock で防がれる前提。SET_ENABLED が "no graph" で
 // 失敗した場合 (cache と実グラフの不整合) のみ cache を捨てて attach 経路にフォールバック。
@@ -201,7 +239,8 @@ const attachOrToggleGraph = async (
     }
   }
   const streamId = await getTabMediaStreamId(tabId);
-  await sendToOffscreen({ type: 'SET_STREAM', tabId, streamId, params, enabled });
+  const mixer = await loadMixerStreamState(tabId);
+  await sendToOffscreen({ type: 'SET_STREAM', tabId, streamId, params, enabled, mixer });
   await addMonitoredTab(tabId);
 };
 
@@ -364,6 +403,16 @@ chrome.runtime.onMessage.addListener((raw, _sender, sendResponse) => {
 
   const handle = async (): Promise<{ ok: boolean; error?: string }> => {
     try {
+      // popup でミキサー設定を変えた直後に届く。storage への保存は送信元 (popup) が送信前に
+      // 行う契約 (UPDATE_PARAMS と同じ) なので、ここでは Offscreen への反映のみ行う。
+      // Offscreen が無いときは反映先のグラフも無いので何もしない (次の SET_STREAM で
+      // 保存済みの設定が渡る)。設定を送るためだけに Offscreen を作らないよう、先に存在を確かめる。
+      if (raw.type === 'UPDATE_MIXER_SETTINGS') {
+        if (await chrome.offscreen.hasDocument()) {
+          await sendToOffscreen({ type: 'SET_AUTO_BALANCE', autoBalance: raw.settings.autoBalance });
+        }
+        return { ok: true };
+      }
       if (!('tabId' in raw)) {
         return { ok: false, error: `unhandled type: ${raw.type}` };
       }
@@ -460,11 +509,25 @@ chrome.runtime.onMessage.addListener((raw, _sender, sendResponse) => {
             }
             return { ok: true };
           }
+          case 'UPDATE_MIXER_OFFSET': {
+            // storage への保存は送信元 (popup) が送信前に行う契約 (UPDATE_PARAMS と同じ)。
+            // このハンドラの責務は Offscreen への反映のみ。
+            if (await isMonitoredTab(raw.tabId)) {
+              await sendOrCleanupOnMissingGraph(raw.tabId, {
+                type: 'UPDATE_MIXER_OFFSET',
+                tabId: raw.tabId,
+                offsetDb: normalizeMixerOffsetDb(raw.offsetDb),
+              });
+            }
+            return { ok: true };
+          }
           case 'MONITOR_TAB': {
             const prev = await loadTabState(raw.tabId);
             // popup を開いた = auto-OFF に気づける状態なのでバッジは役目を終える。
             // attach の成否に依存させないため先にクリアする。
             clearAutoOffBadge(raw.tabId);
+            // タイトルの記録は attach と無関係なので、完了を待たずに始める。
+            void recordTabTitle(raw.tabId);
             // 一度も操作していないタブは、自動有効化設定が ON なら指定プリセットで ON にする。
             if (await applyAutoEnableIfUntouched(raw.tabId, prev)) return { ok: true };
             const params = normalizeCompressorParams(prev?.params ?? raw.params);
@@ -509,6 +572,7 @@ chrome.tabs.onRemoved.addListener((tabId) => {
     await unmarkTabManuallyDisabled(tabId);
     await removeMonitoredTab(tabId);
     await bestEffortDestroyGraph(tabId);
+    await chrome.storage.session.remove([mixerOffsetStorageKey(tabId), mixerTitleStorageKey(tabId)]);
   });
 });
 

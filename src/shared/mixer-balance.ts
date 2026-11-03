@@ -1,3 +1,6 @@
+import { updateExponentialAverage } from './auto-makeup';
+import { clampDb, meanSquareToDb } from './level-math';
+
 // ミキサー: コンプレッサー ON のタブのうち「音が出ている」タブの音量の中央値に、各タブの音量を寄せる。
 // 中央値を基準にすることで、1 つだけ極端に大きい (または小さい) タブに全体の基準が引っ張られない。
 // 各タブのミキサーゲイン = 自動補正 (自動追従 ON のとき) + 手動オフセット。
@@ -67,26 +70,47 @@ export type TabLoudnessMeasurement = {
 //    updateExponentialAverage(loudnessDb, balanceLevelDb, dtSec, config.loudnessTimeConstantSec)
 //    で更新し、silentSec を 0 に戻す
 export const stepTabLoudness = (
-  _state: TabLoudnessState,
-  _measurement: TabLoudnessMeasurement,
-  _config: MixerConfig = MIXER_CONFIG,
+  state: TabLoudnessState,
+  measurement: TabLoudnessMeasurement,
+  config: MixerConfig = MIXER_CONFIG,
 ): TabLoudnessState => {
-  throw new Error('not implemented');
+  const elapsedSec = state.elapsedSec + measurement.dtSec;
+  if (elapsedSec < config.warmupSec) {
+    return { ...state, elapsedSec };
+  }
+  if (measurement.inputDb < config.gateDb) {
+    return { ...state, silentSec: state.silentSec + measurement.dtSec, elapsedSec };
+  }
+  if (measurement.balanceLevelDb === null) {
+    return { ...state, elapsedSec };
+  }
+  return {
+    loudnessDb: updateExponentialAverage(
+      state.loudnessDb,
+      measurement.balanceLevelDb,
+      measurement.dtSec,
+      config.loudnessTimeConstantSec,
+    ),
+    silentSec: 0,
+    elapsedSec,
+  };
 };
 
 // 「音が出ているタブ」か (中央値の計算に含めるか) を返す。
 // loudnessDb が計測済みで、silentSec が config.soundingHoldSec 以下なら true。
 export const isTabSounding = (
-  _state: TabLoudnessState,
-  _config: MixerConfig = MIXER_CONFIG,
-): boolean => {
-  throw new Error('not implemented');
-};
+  state: TabLoudnessState,
+  config: MixerConfig = MIXER_CONFIG,
+): boolean => state.loudnessDb !== null && state.silentSec <= config.soundingHoldSec;
 
 // 中央値を返す。空配列は null。奇数個は中央の値、偶数個は中央 2 値の平均。
 // 引数の配列は並べ替えない (コピーしてから数値として並べる)。
-export const computeMedian = (_values: readonly number[]): number | null => {
-  throw new Error('not implemented');
+export const computeMedian = (values: readonly number[]): number | null => {
+  if (values.length === 0) return null;
+  const sorted = [...values].sort((a, b) => a - b);
+  const middle = Math.floor(sorted.length / 2);
+  if (sorted.length % 2 === 1) return sorted[middle];
+  return (sorted[middle - 1] + sorted[middle]) / 2;
 };
 
 export type AutoBalanceInput = {
@@ -100,10 +124,26 @@ export type AutoBalanceInput = {
 // - 対象の各タブに clamp(M - loudnessDb, config.minAutoGainDb, config.maxAutoGainDb) を割り当てる
 // - 対象外のタブは Map に含めない (呼び出し側が前回値を保持する)。対象が 0 件なら空の Map
 export const computeAutoBalanceGains = (
-  _tabs: readonly AutoBalanceInput[],
-  _config: MixerConfig = MIXER_CONFIG,
+  tabs: readonly AutoBalanceInput[],
+  config: MixerConfig = MIXER_CONFIG,
 ): Map<number, number> => {
-  throw new Error('not implemented');
+  const targets: { tabId: number; loudnessDb: number }[] = [];
+  for (const tab of tabs) {
+    if (tab.sounding && tab.loudnessDb !== null) {
+      targets.push({ tabId: tab.tabId, loudnessDb: tab.loudnessDb });
+    }
+  }
+
+  const gains = new Map<number, number>();
+  const median = computeMedian(targets.map((target) => target.loudnessDb));
+  if (median === null) return gains;
+  for (const target of targets) {
+    gains.set(
+      target.tabId,
+      clampDb(median - target.loudnessDb, config.minAutoGainDb, config.maxAutoGainDb),
+    );
+  }
+  return gains;
 };
 
 export type BalanceLevelInput = {
@@ -120,16 +160,19 @@ export type BalanceLevelInput = {
 // meanSquareToDb(compressedMeanSquare) + staticCompensationDb + (autoMakeupDb ?? 0)
 // compressedMeanSquare が 0 以下なら計測できないものとして null を返す
 // (DB_FLOOR に丸めた値を音量として平均に入れないため)。
-export const estimateBalanceLevelDb = (_input: BalanceLevelInput): number | null => {
-  throw new Error('not implemented');
+export const estimateBalanceLevelDb = (input: BalanceLevelInput): number | null => {
+  if (input.compressedMeanSquare <= 0) return null;
+  return (
+    meanSquareToDb(input.compressedMeanSquare)
+    + input.staticCompensationDb
+    + (input.autoMakeupDb ?? 0)
+  );
 };
 
 // mixerGain に設定するゲイン (dB) を返す。
 // 自動追従 ON なら自動補正 + 手動オフセット、OFF なら手動オフセットのみ。
 export const computeMixerGainDb = (
-  _autoBalanceGainDb: number,
-  _offsetDb: number,
-  _autoBalance: boolean,
-): number => {
-  throw new Error('not implemented');
-};
+  autoBalanceGainDb: number,
+  offsetDb: number,
+  autoBalance: boolean,
+): number => (autoBalance ? autoBalanceGainDb : 0) + offsetDb;

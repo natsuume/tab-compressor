@@ -1,4 +1,5 @@
 import { useId } from 'react';
+import { formatSignedDb } from '../format-db';
 
 type AutoMakeupToggleProps = {
   checked: boolean;
@@ -6,15 +7,6 @@ type AutoMakeupToggleProps = {
   // 現在の自動ゲイン (dB)。自動 Makeup が動作していないときは null
   autoMakeupDb: number | null;
   onChange: (next: boolean) => void;
-};
-
-// 自動ゲインを符号付き小数 1 桁で表示する (例: +3.2 dB / -1.0 dB)。
-// 丸めた結果が 0.0 のときは符号を付けない (-0.04 を -0.0 と表示しない)。
-const formatAutoMakeupDb = (db: number | null): string => {
-  if (db === null) return '—';
-  const magnitude = Math.abs(db).toFixed(1);
-  if (magnitude === '0.0') return '0.0 dB';
-  return `${db > 0 ? '+' : '-'}${magnitude} dB`;
 };
 
 // 自動 Makeup の ON / OFF を切り替える行。ParameterSlider と同じ 3 列 (ラベル / 操作 / 値) で並ぶ。
@@ -46,7 +38,7 @@ export const AutoMakeupToggle = ({
         />
         入出力の音量を一致させる
       </label>
-      <span className="parameter-slider__value">{formatAutoMakeupDb(autoMakeupDb)}</span>
+      <span className="parameter-slider__value">{formatSignedDb(autoMakeupDb)}</span>
       <span id={disabledReasonId} className="visually-hidden">
         コンプレッサーを ON にすると変更できます
       </span>

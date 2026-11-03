@@ -416,6 +416,115 @@ h3 {
   color: var(--color-text-sub);
 }
 
+/* Mixer セクション: 先頭に全タブ共通の自動追従の切り替え、その下にコンプレッサー ON のタブの一覧。
+   --mixer-row-min-height は一覧の 1 行の高さで、読み込み中・空・エラーの表示もこの高さを確保する。 */
+.mixer-panel {
+  --mixer-row-min-height: 28px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.mixer-panel__toggle {
+  align-self: flex-start;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 12px;
+  cursor: pointer;
+}
+
+.mixer-panel__toggle[data-disabled='true'] {
+  opacity: 0.5;
+}
+
+.mixer-panel__toggle input {
+  margin: 0;
+  accent-color: var(--color-accent);
+}
+
+.mixer-panel__toggle input[aria-disabled='true'] {
+  cursor: not-allowed;
+}
+
+.mixer-panel__placeholder {
+  min-height: var(--mixer-row-min-height);
+  display: flex;
+  align-items: center;
+  margin: 0;
+  font-size: 12px;
+  color: var(--color-text-mute);
+}
+
+.mixer-panel__skeleton {
+  width: 100%;
+  height: 12px;
+  border-radius: 4px;
+  background: var(--color-surface-inset);
+}
+
+.mixer-panel__rows {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+/* タイトル列は minmax(0, 1fr) にして、長いタイトルでも列幅を広げず省略表示にする。 */
+.mixer-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 64px 72px 140px 56px;
+  align-items: center;
+  gap: 8px;
+  min-height: var(--mixer-row-min-height);
+  font-size: 12px;
+}
+
+.mixer-row__name {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+}
+
+.mixer-row__current {
+  flex-shrink: 0;
+  padding: 0 6px;
+  border: 1px solid var(--color-accent);
+  border-radius: 999px;
+  background: var(--color-accent-bg);
+  font-size: 11px;
+  color: var(--color-text-sub);
+}
+
+.mixer-row__title {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* 「自動 +12.0 dB」が 72px に収まるよう、他の値より 1 段小さい文字にする。 */
+.mixer-row__auto {
+  font-size: 11px;
+  font-variant-numeric: tabular-nums;
+  text-align: right;
+  white-space: nowrap;
+  color: var(--color-text-mute);
+}
+
+.mixer-row__slider {
+  width: 100%;
+}
+
+.mixer-row__value {
+  font-variant-numeric: tabular-nums;
+  text-align: right;
+  color: var(--color-text-sub);
+}
+
 /* height は CompressorCurveChart の HEIGHT (viewBox の高さ) と同じ値にする。 */
 .curve-chart {
   width: 100%;

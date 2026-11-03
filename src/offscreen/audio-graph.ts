@@ -2,6 +2,7 @@ import type { CompressorParams } from '@/shared/compressor-params';
 import { estimateAutoMakeupCompensationDb } from '@/shared/compressor-curve';
 import {
   AUTO_MAKEUP_APPLY_SMOOTHING_SEC,
+  MIXER_APPLY_SMOOTHING_SEC,
   PARAM_SMOOTHING_TIME_CONSTANT,
 } from '@/shared/constants';
 import { computeLimiterCompensationDb, LIMITER_SETTINGS } from '@/shared/limiter';
@@ -15,6 +16,7 @@ export type AudioGraph = {
   compressor: DynamicsCompressorNode;
   makeupGain: GainNode;
   autoMakeupGain: GainNode;
+  mixerGain: GainNode;
   limiter: DynamicsCompressorNode;
   limiterCompensationGain: GainNode;
   destination: AudioDestinationNode;
@@ -47,13 +49,15 @@ export const buildConstraintsForTabStream = (streamId: string): TabMediaConstrai
 
 // enabled 時の経路:
 //   source → inputAnalyser → compressor → compressorOutputAnalyser → makeupGain
-//   → autoMakeupGain → limiter → limiterCompensationGain → outputAnalyser → destination
+//   → autoMakeupGain → mixerGain → limiter → limiterCompensationGain → outputAnalyser → destination
 // - compressorOutputAnalyser は自動 Makeup の計測用。makeupGain (静的補正 + 手動 Makeup) の
 //   手前で計測するので、自動ゲインが手動 Makeup のオフセットを打ち消さない。
+// - mixerGain はタブ間の音量バランスを揃えるミキサーのゲイン (自動補正 + 手動オフセット)。
+//   limiter の手前に置き、ミキサーで持ち上げた分もリミッターで抑える。
 // - limiter は自動 Makeup などで持ち上げた信号のクリップを防ぐセーフティリミッター。
 //   limiterCompensationGain で limiter 自身の内部メイクアップを打ち消す。
 // - outputAnalyser は destination 直前に置き、実際に出力される音量を計測する。
-//   これにより makeupGain・autoMakeupGain・limiter の変化が Output バーに反映される。
+//   これにより makeupGain・autoMakeupGain・mixerGain・limiter の変化が Output バーに反映される。
 // bypass 時は compressor 以降の処理をスキップし、input/output の値は一致する。
 const connectGraphPath = (graph: AudioGraph, enabled: boolean): void => {
   graph.source.connect(graph.inputAnalyser);
@@ -62,7 +66,8 @@ const connectGraphPath = (graph: AudioGraph, enabled: boolean): void => {
     graph.compressor.connect(graph.compressorOutputAnalyser);
     graph.compressorOutputAnalyser.connect(graph.makeupGain);
     graph.makeupGain.connect(graph.autoMakeupGain);
-    graph.autoMakeupGain.connect(graph.limiter);
+    graph.autoMakeupGain.connect(graph.mixerGain);
+    graph.mixerGain.connect(graph.limiter);
     graph.limiter.connect(graph.limiterCompensationGain);
     graph.limiterCompensationGain.connect(graph.outputAnalyser);
     graph.outputAnalyser.connect(graph.destination);
@@ -81,6 +86,7 @@ const disconnectAllNodes = (graph: AudioGraph): void => {
     graph.compressor.disconnect();
     graph.makeupGain.disconnect();
     graph.autoMakeupGain.disconnect();
+    graph.mixerGain.disconnect();
     graph.limiter.disconnect();
     graph.limiterCompensationGain.disconnect();
   } catch {
@@ -93,6 +99,7 @@ export const createAudioGraph = (
   stream: MediaStream,
   params: CompressorParams,
   enabled: boolean,
+  initialMixerGainDb: number,
 ): AudioGraph => {
   const source = ctx.createMediaStreamSource(stream);
   const inputAnalyser = ctx.createAnalyser();
@@ -101,6 +108,7 @@ export const createAudioGraph = (
   const compressor = ctx.createDynamicsCompressor();
   const makeupGain = ctx.createGain();
   const autoMakeupGain = ctx.createGain();
+  const mixerGain = ctx.createGain();
   const limiter = ctx.createDynamicsCompressor();
   const limiterCompensationGain = ctx.createGain();
 
@@ -116,6 +124,8 @@ export const createAudioGraph = (
   makeupGain.gain.value = computeMakeupLinear(params);
   // 自動ゲインは処理ループが tick ごとに設定する。それまでは 0 dB (素通し)。
   autoMakeupGain.gain.value = 1;
+  // ミキサーのゲインも処理ループが tick ごとに設定する。それまでは呼び出し側が渡した初期値。
+  mixerGain.gain.value = dbToLinear(initialMixerGainDb);
 
   limiter.threshold.value = LIMITER_SETTINGS.threshold;
   limiter.knee.value = LIMITER_SETTINGS.knee;
@@ -133,6 +143,7 @@ export const createAudioGraph = (
     compressor,
     makeupGain,
     autoMakeupGain,
+    mixerGain,
     limiter,
     limiterCompensationGain,
     destination: ctx.destination,
@@ -165,6 +176,16 @@ export const setAutoMakeupGainDb = (
   smoothing = AUTO_MAKEUP_APPLY_SMOOTHING_SEC,
 ): void => {
   graph.autoMakeupGain.gain.setTargetAtTime(dbToLinear(gainDb), now, smoothing);
+};
+
+// ミキサーのゲイン (dB) を mixerGain に反映する。
+export const setMixerGainDb = (
+  graph: AudioGraph,
+  gainDb: number,
+  now: number,
+  smoothing = MIXER_APPLY_SMOOTHING_SEC,
+): void => {
+  graph.mixerGain.gain.setTargetAtTime(dbToLinear(gainDb), now, smoothing);
 };
 
 export const setGraphEnabled = (

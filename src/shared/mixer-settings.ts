@@ -14,16 +14,22 @@ export const DEFAULT_MIXER_SETTINGS: MixerSettings = {
 // storage から読んだ値を MixerSettings に整える。
 // - object でなければ DEFAULT_MIXER_SETTINGS を返す
 // - autoBalance が boolean でなければ DEFAULT_MIXER_SETTINGS.autoBalance を使う
-export const normalizeMixerSettings = (_raw: unknown): MixerSettings => {
-  throw new Error('not implemented');
+export const normalizeMixerSettings = (raw: unknown): MixerSettings => {
+  if (typeof raw !== 'object' || raw === null) return DEFAULT_MIXER_SETTINGS;
+  const autoBalance = 'autoBalance' in raw ? raw.autoBalance : undefined;
+  return {
+    autoBalance:
+      typeof autoBalance === 'boolean' ? autoBalance : DEFAULT_MIXER_SETTINGS.autoBalance,
+  };
 };
 
 // chrome.storage.local から設定を読み込む。未保存なら DEFAULT_MIXER_SETTINGS。
 export const loadMixerSettings = async (): Promise<MixerSettings> => {
-  throw new Error('not implemented');
+  const result = await chrome.storage.local.get(MIXER_SETTINGS_STORAGE_KEY);
+  return normalizeMixerSettings(result[MIXER_SETTINGS_STORAGE_KEY]);
 };
 
 // chrome.storage.local に設定を保存する。
-export const saveMixerSettings = async (_settings: MixerSettings): Promise<void> => {
-  throw new Error('not implemented');
+export const saveMixerSettings = async (settings: MixerSettings): Promise<void> => {
+  await chrome.storage.local.set({ [MIXER_SETTINGS_STORAGE_KEY]: settings });
 };
