@@ -11,6 +11,12 @@ import { DEFAULT_PRESET, DEFAULT_PRESET_ID } from '@/shared/presets';
 import { loadUserPresets } from '@/shared/user-presets';
 import { decideAutoEnableState, loadAutoEnableSettings } from '@/shared/auto-enable-settings';
 import { ensureOffscreenDocument } from './offscreen-manager';
+import {
+  clearManuallyDisabledTabs,
+  isTabManuallyDisabled,
+  markTabManuallyDisabled,
+  unmarkTabManuallyDisabled,
+} from './manually-disabled-tabs';
 import { getTabMediaStreamId } from './capture-stream';
 
 // MV3 の Service Worker はアイドルで終了しメモリが揮発するため、
@@ -155,19 +161,21 @@ const saveTabState = async (tabId: number, state: TabState): Promise<void> => {
 // 自動有効化設定に従って ON にすべきかを判断する。
 // ON にする場合は保存すべき TabState、しない場合は null を返す。
 // TabState があるタブ (一度でも操作したタブ) は判定するまでもなく対象外なので、
-// 設定と My Presets の読み込みを省く。
+// 手動 OFF の記録・設定・My Presets の読み込みを省く。
 // 読み込みに失敗した場合は自動有効化しない扱いで null を返す。例外を投げると
 // MONITOR_TAB のメーター用 attach まで止まってしまうため。
 const loadAutoEnableStateForUntouchedTab = async (
+  tabId: number,
   prev: TabState | undefined,
 ): Promise<TabState | null> => {
   if (prev !== undefined) return null;
   try {
-    const [settings, userPresets] = await Promise.all([
+    const [wasManuallyDisabled, settings, userPresets] = await Promise.all([
+      isTabManuallyDisabled(tabId),
       loadAutoEnableSettings(),
       loadUserPresets(),
     ]);
-    return decideAutoEnableState(prev, settings, userPresets);
+    return decideAutoEnableState(prev, wasManuallyDisabled, settings, userPresets);
   } catch (err) {
     console.warn('[tab-compressor] auto-enable settings load failed', err);
     return null;
@@ -205,7 +213,7 @@ const applyAutoEnableIfUntouched = async (
   tabId: number,
   prev: TabState | undefined,
 ): Promise<boolean> => {
-  const autoEnabledState = await loadAutoEnableStateForUntouchedTab(prev);
+  const autoEnabledState = await loadAutoEnableStateForUntouchedTab(tabId, prev);
   if (autoEnabledState === null) return false;
   await attachOrToggleGraph(tabId, autoEnabledState.params, true);
   await saveTabState(tabId, autoEnabledState);
@@ -407,6 +415,7 @@ chrome.runtime.onMessage.addListener((raw, _sender, sendResponse) => {
             };
             await saveTabState(raw.tabId, next);
             clearAutoOffBadge(raw.tabId);
+            await unmarkTabManuallyDisabled(raw.tabId);
             return { ok: true };
           }
           case 'DISABLE_TAB': {
@@ -431,6 +440,8 @@ chrome.runtime.onMessage.addListener((raw, _sender, sendResponse) => {
             if (latest !== undefined) {
               await saveTabState(raw.tabId, { ...latest, enabled: false });
             }
+            // 拡張の更新・再読み込みで TabState が消えた後も、このタブを自動有効化の対象外にする。
+            await markTabManuallyDisabled(raw.tabId);
             return { ok: true };
           }
           case 'UPDATE_PARAMS': {
@@ -495,6 +506,7 @@ chrome.runtime.onMessage.addListener((raw, _sender, sendResponse) => {
 chrome.tabs.onRemoved.addListener((tabId) => {
   void withTabLock(tabId, async () => {
     await chrome.storage.session.remove(tabStorageKey(tabId));
+    await unmarkTabManuallyDisabled(tabId);
     await removeMonitoredTab(tabId);
     await bestEffortDestroyGraph(tabId);
   });
@@ -503,6 +515,8 @@ chrome.tabs.onRemoved.addListener((tabId) => {
 chrome.runtime.onStartup.addListener(() => {
   void (async () => {
     await chrome.storage.session.clear();
+    // タブ ID はブラウザ起動ごとに振り直されるため、前回のセッションの手動 OFF の記録は捨てる。
+    await clearManuallyDisabledTabs();
     await resetMonitoredTabs();
   })();
 });

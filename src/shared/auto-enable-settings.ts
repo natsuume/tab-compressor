@@ -79,14 +79,18 @@ export const resolvePresetRef = (
 // ON にしない場合は null を返す。null になる条件:
 // - prev が存在する (= このタブで一度でも操作した。手動 OFF・auto-OFF 後の状態を含む)。
 //   ユーザーが OFF にしたタブを勝手に ON に戻さない
+// - wasManuallyDisabled が true。TabState は拡張の更新・再読み込みで消えるため、
+//   手動で OFF にしたタブは別途記録しておき、その記録でも対象外にする
 // - settings.enabled が false
 // - settings.presetId の参照先が見つからない。補完値で ON にはしない
 export const decideAutoEnableState = (
   prev: TabState | undefined,
+  wasManuallyDisabled: boolean,
   settings: AutoEnableSettings,
   userPresets: readonly UserPreset[],
 ): TabState | null => {
   if (prev !== undefined) return null;
+  if (wasManuallyDisabled) return null;
   if (!settings.enabled) return null;
   const resolved = resolvePresetRef(settings.presetId, userPresets);
   if (resolved === null) return null;
