@@ -84,7 +84,7 @@ const saturate = (x: number, model: CurveModel): number => {
 const computeOutputDbWithModel = (inputDb: number, model: CurveModel): number =>
   linearToDb(saturate(dbToLinear(inputDb), model));
 
-export const computeOutputDb = (inputDb: number, params: CompressorParams): number =>
+export const computeOutputDb = (inputDb: number, params: CurveShapeParams): number =>
   computeOutputDbWithModel(inputDb, buildCurveModel(params));
 
 export type CurvePoint = { inputDb: number; outputDb: number };
