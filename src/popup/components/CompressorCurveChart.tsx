@@ -10,7 +10,8 @@ type CompressorCurveChartProps = {
 const MIN_DB = -60;
 const MAX_DB = 0;
 const WIDTH = 316;
-const HEIGHT = 160;
+// styles.css の .curve-chart の height と同じ値にする (違うと縦方向に引き伸ばされる)。
+const HEIGHT = 130;
 const PADDING = { top: 8, right: 8, bottom: 20, left: 28 };
 const PLOT_WIDTH = WIDTH - PADDING.left - PADDING.right;
 const PLOT_HEIGHT = HEIGHT - PADDING.top - PADDING.bottom;
