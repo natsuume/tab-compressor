@@ -1,5 +1,6 @@
 import type { CompressorParams } from '@/shared/compressor-params';
 import { INITIAL_AUTO_MAKEUP_STATE, type AutoMakeupState } from '@/shared/auto-makeup';
+import { INITIAL_TAB_LOUDNESS_STATE, type TabLoudnessState } from '@/shared/mixer-balance';
 import {
   applyParams,
   buildConstraintsForTabStream,
@@ -9,13 +10,19 @@ import {
   type AudioGraph,
 } from './audio-graph';
 
-// タブ 1 つ分のグラフと、そのタブに適用中の params・自動 Makeup の状態。
-// 処理ループが毎 tick autoMakeupState を書き換える可変オブジェクト。
+// タブ 1 つ分のグラフと、そのタブに適用中の params・自動 Makeup とミキサーの状態。
+// 処理ループが毎 tick autoMakeupState・loudnessState・autoBalanceGainDb を書き換える可変オブジェクト。
 export type RegistryEntry = {
   tabId: number;
   graph: AudioGraph;
   params: CompressorParams;
   autoMakeupState: AutoMakeupState;
+  // ミキサーの手動オフセット (dB)
+  mixerOffsetDb: number;
+  // ミキサーが揃える音量の計測状態
+  loudnessState: TabLoudnessState;
+  // 直近に算出したミキサーの自動補正 (dB)。音が出ていない間は前回値を保持する
+  autoBalanceGainDb: number;
 };
 
 let audioContext: AudioContext | null = null;
@@ -66,6 +73,7 @@ export const setStreamForTab = async (
   streamId: string,
   params: CompressorParams,
   enabled: boolean,
+  mixerOffsetDb: number,
 ): Promise<void> => {
   // Chrome の tabCapture は同一タブの同時キャプチャを許さない (`getUserMedia` が失敗する)。
   // そのため acquire-first の rollback-safe 順序は採れず、先に old graph を破棄して
@@ -76,8 +84,17 @@ export const setStreamForTab = async (
     removeTab(tabId);
   }
   const stream = await captureStream(streamId);
-  const graph = createAudioGraph(getAudioContext(), stream, params, enabled);
-  entries.set(tabId, { tabId, graph, params, autoMakeupState: INITIAL_AUTO_MAKEUP_STATE });
+  // ミキサーの自動補正は 0 dB から始めるため、mixerGain の初期値は手動オフセットだけにする。
+  const graph = createAudioGraph(getAudioContext(), stream, params, enabled, mixerOffsetDb);
+  entries.set(tabId, {
+    tabId,
+    graph,
+    params,
+    autoMakeupState: INITIAL_AUTO_MAKEUP_STATE,
+    mixerOffsetDb,
+    loudnessState: INITIAL_TAB_LOUDNESS_STATE,
+    autoBalanceGainDb: 0,
+  });
   watchStreamLifecycle(tabId, graph);
 };
 
@@ -101,13 +118,24 @@ export const setTabEnabled = (
 ): boolean => {
   const entry = entries.get(tabId);
   if (entry === undefined) return false;
-  // コンプレッサーの ON / OFF を切り替えたときは、自動 Makeup を初期状態から始め直す。
+  // コンプレッサーの ON / OFF を切り替えたときは、自動 Makeup とミキサーを初期状態から始め直す。
   // setGraphEnabled が graph.enabled を書き換えるため、その前に判定する。
   if (entry.graph.enabled !== enabled) {
     entry.autoMakeupState = INITIAL_AUTO_MAKEUP_STATE;
+    entry.loudnessState = INITIAL_TAB_LOUDNESS_STATE;
+    entry.autoBalanceGainDb = 0;
   }
   entry.params = params;
   setGraphEnabled(entry.graph, enabled, params, getAudioContext().currentTime);
+  return true;
+};
+
+// ミキサーの手動オフセットを更新する。グラフが無ければ false。
+// GainNode への反映は処理ループが毎 tick 行うため、ここでは状態の更新のみ行う。
+export const setTabMixerOffset = (tabId: number, offsetDb: number): boolean => {
+  const entry = entries.get(tabId);
+  if (entry === undefined) return false;
+  entry.mixerOffsetDb = offsetDb;
   return true;
 };
 

@@ -11,6 +11,8 @@ const EMPTY_METERS: MeterValues = {
   outPeakDb: DB_FLOOR,
   reductionDb: 0,
   autoMakeupDb: null,
+  mixerAutoDb: null,
+  mixerGainDb: null,
 };
 
 export const useMeterStream = (tabId: number | null): MeterValues => {
@@ -33,6 +35,8 @@ export const useMeterStream = (tabId: number | null): MeterValues => {
         outPeakDb: sample.outPeakDb,
         reductionDb: sample.reductionDb,
         autoMakeupDb: sample.autoMakeupDb,
+        mixerAutoDb: sample.mixerAutoDb,
+        mixerGainDb: sample.mixerGainDb,
       };
     };
 

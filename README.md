@@ -9,7 +9,8 @@
 - **ページ遷移を跨いで維持**: 同一タブ内で別ページへ遷移 (SPA 遷移・リロード・通常のリンク遷移) しても ON のまま維持される。キャプチャが失われて再取得もできない場合のみ自動で OFF になり、ツールバーバッジ「OFF」で通知する
 - **リアルタイム可視化**: 入力/出力/リダクションの各レベルメーター＋入出力カーブグラフ
 - **自動 Makeup**: ON にすると、入力と出力の音量が一致するように Makeup をリアルタイムに自動調整する。手動の Makeup スライダーは、入出力一致を 0 dB としたオフセットとして加算される。時間平均したゲイン低減量に追従するため、短い絶叫に対する抑圧はそのまま残る。ON / OFF はタブごと・プリセットごとに保存する
-- **セーフティリミッター**: コンプレッサーが ON のタブでは経路の末尾に -2 dBFS のリミッターを常設し、Makeup で持ち上げた音のクリップを抑える
+- **セーフティリミッター**: コンプレッサーが ON のタブでは経路の末尾に -3 dBFS のリミッターを常設し、Makeup やミキサーで持ち上げた音のクリップを抑える
+- **ミキサー**: コンプレッサーが ON のタブ同士の音量バランスを揃える。自動追従を ON にすると、音が出ているタブの音量の中央値に各タブの音量を自動で寄せる。タブごとのオフセットはその上に加算され、自動追従が OFF のときは単純なタブ別ボリュームになる。各タブの手動 Makeup は、自動追従が ON でもオフセットとして残る。自動追従の ON / OFF は全タブ共通で `chrome.storage.local` に保存し、オフセットはタブごとに保持する (タブを閉じると破棄)
 - **プリセット**: 組み込みの「静音」に加え、現在の設定を My Presets として保存できる
 - **自動有効化**: 設定を ON にすると、まだ操作していないタブで popup を開いた時点で、選んだプリセット (組み込み / My Presets) でコンプレッサーが ON になる。設定を ON にしたときに popup を開いているタブも、未操作ならその場で ON になる。一度 OFF にしたタブには適用しない。設定は `chrome.storage.local` に保存し、ブラウザを再起動しても保持する
 - **タブ単位の設定永続化**: `chrome.storage.session` により、ブラウザセッション中のみ保持（タブを閉じると破棄）
@@ -53,7 +54,7 @@ pnpm build          # 本番ビルド → dist/
 ```
 
 - **Service Worker**: `chrome.tabCapture.getMediaStreamId({ targetTabId })` で streamId を発行し Offscreen に引き渡す
-- **Offscreen Document**: `getUserMedia` で MediaStream を取得し、ON のタブでは `source → inputAnalyser → compressor → compressorOutputAnalyser → makeupGain → autoMakeupGain → limiter → limiterCompensationGain → outputAnalyser → destination` を構築。30Hz の処理ループで、各タブの自動 Makeup の更新とメーター配信を行う
+- **Offscreen Document**: `getUserMedia` で MediaStream を取得し、ON のタブでは `source → inputAnalyser → compressor → compressorOutputAnalyser → makeupGain → autoMakeupGain → mixerGain → limiter → limiterCompensationGain → outputAnalyser → destination` を構築。30Hz の処理ループで、各タブの自動 Makeup と全タブ分のミキサーの更新、メーター配信を行う
 - **Popup**: `chrome.storage.session` を真実の情報源として購読・更新。メーターは `BroadcastChannel` 経由で受信
 
 ## ディレクトリ構成
@@ -61,9 +62,9 @@ pnpm build          # 本番ビルド → dist/
 ```
 src/
 ├── background/   # Service Worker：メッセージハブ、Offscreen 管理、tabs ライフサイクル
-├── offscreen/    # AudioGraph：tabId ごとの source/compressor/limiter/analyser、自動 Makeup の更新とメーター配信を行う処理ループ
-├── popup/        # React UI：トグル、プリセット、スライダー、グラフ、メーター
-└── shared/       # 型定義、デフォルト値、プリセット、純粋関数（圧縮カーブ・dB変換・自動 Makeup の制御則・リミッター設定）
+├── offscreen/    # AudioGraph：tabId ごとの source/compressor/mixer/limiter/analyser、自動 Makeup・ミキサーの更新とメーター配信を行う処理ループ
+├── popup/        # React UI：トグル、プリセット、スライダー、グラフ、メーター、ミキサー
+└── shared/       # 型定義、デフォルト値、プリセット、純粋関数（圧縮カーブ・dB変換・自動 Makeup の制御則・ミキサーの制御則・リミッター設定）
 ```
 
 ## 制限事項
@@ -73,3 +74,6 @@ src/
 - アイコン画像は未同梱。必要に応じて `public/icons/` に配置し、`manifest.config.ts` の `icons` を復活させてください
 - 別オリジンのページへ遷移した後にキャプチャが失われた場合は、activeTab の付与が切れているため自動復旧できず OFF に戻る (popup から再度 ON にする)
 - 自動有効化では、タブを開いただけでは ON にならない。`chrome.tabCapture` はユーザーが拡張を呼び出した (アイコンのクリック等) タブでしか使えないため、各タブで 1 回 popup を開く必要がある
+- ミキサーの対象はコンプレッサーが ON のタブだけ。OFF のタブは popup を閉じるとキャプチャを解放するため、音量を揃えられない
+- ミキサーの一覧のタブ名は、そのタブで popup を開いた時点のもの。その後にページを遷移しても、そのタブで popup を開き直すまで更新されない
+- シークレット ウィンドウのタブはタイトルを記録しない。ミキサーの一覧では「タブ」と ID だけで表示される

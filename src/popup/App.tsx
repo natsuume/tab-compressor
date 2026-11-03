@@ -9,12 +9,16 @@ import { useMeterStream } from './hooks/useMeterStream';
 import { useMonitorTab } from './hooks/useMonitorTab';
 import { useUserPresets } from './hooks/useUserPresets';
 import { useAutoEnableSettings } from './hooks/useAutoEnableSettings';
+import { useMixerSettings } from './hooks/useMixerSettings';
+import { useMixerTabs } from './hooks/useMixerTabs';
+import { useTabMeters } from './hooks/useTabMeters';
 import { PowerToggle } from './components/PowerToggle';
 import { PresetSelector } from './components/PresetSelector';
 import { ParameterPanel } from './components/ParameterPanel';
 import { LevelMeters } from './components/LevelMeters';
 import { CompressorCurveChart } from './components/CompressorCurveChart';
 import { AutoEnableSettingsPanel } from './components/AutoEnableSettingsPanel';
+import { MixerPanel } from './components/MixerPanel';
 
 export const App = () => {
   const tabId = useCurrentTabId();
@@ -26,6 +30,13 @@ export const App = () => {
     isReady: isAutoEnableReady,
     update: updateAutoEnableSettings,
   } = useAutoEnableSettings();
+  const {
+    settings: mixerSettings,
+    isReady: isMixerSettingsReady,
+    update: updateMixerSettings,
+  } = useMixerSettings();
+  const { status: mixerStatus, tabs: mixerTabs, setOffset: setMixerOffset } = useMixerTabs();
+  const tabMeters = useTabMeters();
   useMonitorTab(tabId, state.params);
 
   const handleToggle = useCallback(() => {
@@ -97,6 +108,20 @@ export const App = () => {
     [autoEnableSettings.enabled, updateAutoEnableSettings, applyAutoEnable],
   );
 
+  const handleAutoBalanceChange = useCallback(
+    (autoBalance: boolean) => {
+      void updateMixerSettings({ ...mixerSettings, autoBalance });
+    },
+    [mixerSettings, updateMixerSettings],
+  );
+
+  const handleMixerOffsetChange = useCallback(
+    (targetTabId: number, offsetDb: number) => {
+      void setMixerOffset(targetTabId, offsetDb);
+    },
+    [setMixerOffset],
+  );
+
   const controlsDisabled = !state.enabled;
 
   return (
@@ -150,6 +175,22 @@ export const App = () => {
           />
         </section>
       </div>
+
+      {/* 全タブ共通の設定とコンプレッサー ON の全タブの一覧で、このタブの ON / OFF とは無関係なので
+          controlsDisabled では無効化しない */}
+      <section className="section">
+        <span className="section__heading">Mixer</span>
+        <MixerPanel
+          status={mixerStatus}
+          tabs={mixerTabs}
+          currentTabId={tabId}
+          meters={tabMeters}
+          settings={mixerSettings}
+          isSettingsReady={isMixerSettingsReady}
+          onAutoBalanceChange={handleAutoBalanceChange}
+          onOffsetChange={handleMixerOffsetChange}
+        />
+      </section>
     </div>
   );
 };
