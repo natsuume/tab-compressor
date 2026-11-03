@@ -3,7 +3,7 @@ import {
   computeAutoBalanceGains,
   computeMedian,
   computeMixerGainDb,
-  estimatePreMixerDb,
+  estimateBalanceLevelDb,
   INITIAL_TAB_LOUDNESS_STATE,
   isTabSounding,
   MIXER_CONFIG,
@@ -22,7 +22,7 @@ describe('stepTabLoudness', () => {
   it('warm-up を過ぎた未計測の状態にゲート以上のブロックを与えると、その音量で平均を始めて無音の経過秒を 0 にする', () => {
     const next = stepTabLoudness(WARMED_UP_INITIAL_STATE, {
       inputDb: -20,
-      preMixerDb: -24,
+      balanceLevelDb: -24,
       dtSec: 0.1,
     });
     expect(next.loudnessDb).toBe(-24);
@@ -33,7 +33,7 @@ describe('stepTabLoudness', () => {
   it('初期化から warm-up (0.2 秒) 未満のブロックは、ゲート以上でも平均に使わない', () => {
     const next = stepTabLoudness(INITIAL_TAB_LOUDNESS_STATE, {
       inputDb: -20,
-      preMixerDb: -90,
+      balanceLevelDb: -90,
       dtSec: 0.1,
     });
     expect(next.loudnessDb).toBeNull();
@@ -44,21 +44,21 @@ describe('stepTabLoudness', () => {
   it('warm-up を過ぎた最初のブロックから平均に使う', () => {
     const afterWarmup = stepTabLoudness(
       { ...INITIAL_TAB_LOUDNESS_STATE, elapsedSec: 0.15 },
-      { inputDb: -20, preMixerDb: -24, dtSec: 0.1 },
+      { inputDb: -20, balanceLevelDb: -24, dtSec: 0.1 },
     );
     expect(afterWarmup.loudnessDb).toBe(-24);
   });
 
   it('入力がゲート未満なら、音量の平均は据え置き、無音の経過秒が dtSec だけ増える', () => {
     const state: TabLoudnessState = { loudnessDb: -24, silentSec: 1, elapsedSec: 10 };
-    const next = stepTabLoudness(state, { inputDb: -60, preMixerDb: -70, dtSec: 0.1 });
+    const next = stepTabLoudness(state, { inputDb: -60, balanceLevelDb: -70, dtSec: 0.1 });
     expect(next.loudnessDb).toBe(-24);
     expect(next.silentSec).toBeCloseTo(1.1);
   });
 
-  it('ミキサー手前の音量が計測できない (null) ブロックでは、音量の平均と無音の経過秒を据え置く', () => {
+  it('バランス基準の音量が計測できない (null) ブロックでは、音量の平均と無音の経過秒を据え置く', () => {
     const state: TabLoudnessState = { loudnessDb: -24, silentSec: 1, elapsedSec: 10 };
-    const next = stepTabLoudness(state, { inputDb: -20, preMixerDb: null, dtSec: 0.1 });
+    const next = stepTabLoudness(state, { inputDb: -20, balanceLevelDb: null, dtSec: 0.1 });
     expect(next.loudnessDb).toBe(-24);
     expect(next.silentSec).toBe(1);
     expect(next.elapsedSec).toBeCloseTo(10.1);
@@ -68,7 +68,7 @@ describe('stepTabLoudness', () => {
     const state: TabLoudnessState = { loudnessDb: -24, silentSec: 0, elapsedSec: 10 };
     const next = stepTabLoudness(state, {
       inputDb: -20,
-      preMixerDb: -14,
+      balanceLevelDb: -14,
       dtSec: MIXER_CONFIG.loudnessTimeConstantSec,
     });
     // -24 + 10 × (1 - e^-1) ≈ -17.68
@@ -78,8 +78,8 @@ describe('stepTabLoudness', () => {
 
   it('引数の state と measurement を変更せず、ゲートの有無に関わらず新しい state を返す', () => {
     const state: TabLoudnessState = { loudnessDb: -24, silentSec: 1, elapsedSec: 10 };
-    const sounding: TabLoudnessMeasurement = { inputDb: -20, preMixerDb: -14, dtSec: 0.1 };
-    const silent: TabLoudnessMeasurement = { inputDb: -60, preMixerDb: -70, dtSec: 0.1 };
+    const sounding: TabLoudnessMeasurement = { inputDb: -20, balanceLevelDb: -14, dtSec: 0.1 };
+    const silent: TabLoudnessMeasurement = { inputDb: -60, balanceLevelDb: -70, dtSec: 0.1 };
     const stateBefore = { ...state };
     const soundingBefore = { ...sounding };
     const silentBefore = { ...silent };
@@ -198,37 +198,34 @@ describe('computeAutoBalanceGains', () => {
   });
 });
 
-describe('estimatePreMixerDb', () => {
-  it('compressor 出力の音量に、静的補正・手動 Makeup・自動 Makeup を足す', () => {
-    // -20 + (-3) + (-4) + 2 = -25
+describe('estimateBalanceLevelDb', () => {
+  it('compressor 出力の音量に、静的補正と自動 Makeup を足す (手動 Makeup は含めない)', () => {
+    // -20 + (-3) + 2 = -21
     expect(
-      estimatePreMixerDb({
+      estimateBalanceLevelDb({
         compressedMeanSquare: 0.01,
         staticCompensationDb: -3,
-        manualMakeupGainDb: -4,
         autoMakeupDb: 2,
       }),
-    ).toBeCloseTo(-25);
+    ).toBeCloseTo(-21);
   });
 
   it('自動 Makeup が動作していない (null) なら 0 dB として扱う', () => {
-    // -20 + (-3) + (-4) = -27
+    // -20 + (-3) = -23
     expect(
-      estimatePreMixerDb({
+      estimateBalanceLevelDb({
         compressedMeanSquare: 0.01,
         staticCompensationDb: -3,
-        manualMakeupGainDb: -4,
         autoMakeupDb: null,
       }),
-    ).toBeCloseTo(-27);
+    ).toBeCloseTo(-23);
   });
 
   it('compressor 出力の平均二乗が 0 なら、計測できないものとして null を返す', () => {
     expect(
-      estimatePreMixerDb({
+      estimateBalanceLevelDb({
         compressedMeanSquare: 0,
         staticCompensationDb: -3,
-        manualMakeupGainDb: -4,
         autoMakeupDb: null,
       }),
     ).toBeNull();

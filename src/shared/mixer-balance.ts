@@ -2,6 +2,8 @@
 // 中央値を基準にすることで、1 つだけ極端に大きい (または小さい) タブに全体の基準が引っ張られない。
 // 各タブのミキサーゲイン = 自動補正 (自動追従 ON のとき) + 手動オフセット。
 // 自動追従 OFF のときは手動オフセットだけが掛かる、単純なタブ別ボリュームになる。
+// 揃える音量 (バランス基準の音量) には手動 Makeup を含めない。手動 Makeup は自動 Makeup と同じく
+// 基準に加算するオフセットなので、自動追従 ON でも「他のタブよりその dB だけ大きい・小さい」が残る。
 
 // ミキサーの制御パラメータ。
 export type MixerConfig = {
@@ -32,7 +34,7 @@ export const MIXER_CONFIG: MixerConfig = {
 
 // タブ 1 つ分の音量の計測状態。
 export type TabLoudnessState = {
-  // ミキサー手前の音量 (dB) の指数移動平均。未計測なら null
+  // バランス基準の音量 (dB) の指数移動平均。未計測なら null
   loudnessDb: number | null;
   // 最後に入力がゲートを超えてからの経過秒
   silentSec: number;
@@ -50,8 +52,8 @@ export const INITIAL_TAB_LOUDNESS_STATE: TabLoudnessState = {
 export type TabLoudnessMeasurement = {
   // 今回のブロックの入力 RMS (dBFS)。ゲート判定に使う
   inputDb: number;
-  // 今回のブロックのミキサー手前の音量 (dBFS)。compressor 出力が 0 で計測できなければ null
-  preMixerDb: number | null;
+  // 今回のブロックのバランス基準の音量 (dBFS)。compressor 出力が 0 で計測できなければ null
+  balanceLevelDb: number | null;
   // 前回の計測からの経過秒
   dtSec: number;
 };
@@ -60,9 +62,9 @@ export type TabLoudnessMeasurement = {
 // どの場合も elapsedSec に dtSec を足す。そのうえで上から順に判定する。
 // 1. 足した後の elapsedSec が config.warmupSec 未満なら、loudnessDb と silentSec は据え置く
 // 2. inputDb が config.gateDb 未満なら、loudnessDb は据え置き、silentSec に dtSec を足す
-// 3. preMixerDb が null なら、loudnessDb と silentSec は据え置く
+// 3. balanceLevelDb が null なら、loudnessDb と silentSec は据え置く
 // 4. それ以外は loudnessDb を
-//    updateExponentialAverage(loudnessDb, preMixerDb, dtSec, config.loudnessTimeConstantSec)
+//    updateExponentialAverage(loudnessDb, balanceLevelDb, dtSec, config.loudnessTimeConstantSec)
 //    で更新し、silentSec を 0 に戻す
 export const stepTabLoudness = (
   _state: TabLoudnessState,
@@ -104,23 +106,21 @@ export const computeAutoBalanceGains = (
   throw new Error('not implemented');
 };
 
-export type PreMixerLevelInput = {
+export type BalanceLevelInput = {
   // compressor 出力 (makeupGain 手前) の平均二乗
   compressedMeanSquare: number;
   // makeupGain の静的補正
   staticCompensationDb: number;
-  // makeupGain の手動 Makeup
-  manualMakeupGainDb: number;
   // 自動 Makeup のゲイン。動作していなければ null (0 dB として扱う)
   autoMakeupDb: number | null;
 };
 
-// ミキサー手前 (autoMakeupGain の出力) の音量 (dBFS) を、compressor 出力の計測値に
-// makeupGain と autoMakeupGain のゲインを足して求める。
-// meanSquareToDb(compressedMeanSquare) + staticCompensationDb + manualMakeupGainDb + (autoMakeupDb ?? 0)
+// バランス基準の音量 (dBFS) を、compressor 出力の計測値に静的補正と自動 Makeup のゲインを足して求める。
+// 手動 Makeup は基準に加算するオフセットとして残すため含めない (ファイル冒頭のコメントを参照)。
+// meanSquareToDb(compressedMeanSquare) + staticCompensationDb + (autoMakeupDb ?? 0)
 // compressedMeanSquare が 0 以下なら計測できないものとして null を返す
 // (DB_FLOOR に丸めた値を音量として平均に入れないため)。
-export const estimatePreMixerDb = (_input: PreMixerLevelInput): number | null => {
+export const estimateBalanceLevelDb = (_input: BalanceLevelInput): number | null => {
   throw new Error('not implemented');
 };
 
