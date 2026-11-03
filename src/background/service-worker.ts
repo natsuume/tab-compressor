@@ -6,13 +6,17 @@ import {
 } from '@/shared/messages';
 import { MONITOR_PORT_PREFIX } from '@/shared/constants';
 import { tabStorageKey, type TabState } from '@/shared/tab-state';
-import {
-  DEFAULT_PARAMS,
-  normalizeCompressorParams,
-  type CompressorParams,
-} from '@/shared/compressor-params';
-import { DEFAULT_PRESET_ID } from '@/shared/presets';
+import { normalizeCompressorParams, type CompressorParams } from '@/shared/compressor-params';
+import { DEFAULT_PRESET, DEFAULT_PRESET_ID } from '@/shared/presets';
+import { loadUserPresets } from '@/shared/user-presets';
+import { decideAutoEnableState, loadAutoEnableSettings } from '@/shared/auto-enable-settings';
 import { ensureOffscreenDocument } from './offscreen-manager';
+import {
+  clearManuallyDisabledTabs,
+  isTabManuallyDisabled,
+  markTabManuallyDisabled,
+  unmarkTabManuallyDisabled,
+} from './manually-disabled-tabs';
 import { getTabMediaStreamId } from './capture-stream';
 
 // MV3 の Service Worker はアイドルで終了しメモリが揮発するため、
@@ -154,6 +158,30 @@ const saveTabState = async (tabId: number, state: TabState): Promise<void> => {
   await chrome.storage.session.set({ [tabStorageKey(tabId)]: state });
 };
 
+// 自動有効化設定に従って ON にすべきかを判断する。
+// ON にする場合は保存すべき TabState、しない場合は null を返す。
+// TabState があるタブ (一度でも操作したタブ) は判定するまでもなく対象外なので、
+// 手動 OFF の記録・設定・My Presets の読み込みを省く。
+// 読み込みに失敗した場合は自動有効化しない扱いで null を返す。例外を投げると
+// MONITOR_TAB のメーター用 attach まで止まってしまうため。
+const loadAutoEnableStateForUntouchedTab = async (
+  tabId: number,
+  prev: TabState | undefined,
+): Promise<TabState | null> => {
+  if (prev !== undefined) return null;
+  try {
+    const [wasManuallyDisabled, settings, userPresets] = await Promise.all([
+      isTabManuallyDisabled(tabId),
+      loadAutoEnableSettings(),
+      loadUserPresets(),
+    ]);
+    return decideAutoEnableState(prev, wasManuallyDisabled, settings, userPresets);
+  } catch (err) {
+    console.warn('[tab-compressor] auto-enable settings load failed', err);
+    return null;
+  }
+};
+
 // 既存グラフがあれば経路切替のみ、なければタブキャプチャから構築。
 // 同一 tabId 並行は withTabLock で防がれる前提。SET_ENABLED が "no graph" で
 // 失敗した場合 (cache と実グラフの不整合) のみ cache を捨てて attach 経路にフォールバック。
@@ -175,6 +203,21 @@ const attachOrToggleGraph = async (
   const streamId = await getTabMediaStreamId(tabId);
   await sendToOffscreen({ type: 'SET_STREAM', tabId, streamId, params, enabled });
   await addMonitoredTab(tabId);
+};
+
+// 未操作のタブ (TabState が無いタブ) を、自動有効化設定に従って ON にする。ON にしたら true。
+// popup を開いた時点 (MONITOR_TAB) と、popup で設定を ON にした直後 (APPLY_AUTO_ENABLE) の
+// 両方から呼ぶ。どちらも popup が開いている = activeTab が付与されているので tabCapture できる。
+// ENABLE_TAB と同じく attach が成功してから storage を更新する。呼び出し側で withTabLock を取ること。
+const applyAutoEnableIfUntouched = async (
+  tabId: number,
+  prev: TabState | undefined,
+): Promise<boolean> => {
+  const autoEnabledState = await loadAutoEnableStateForUntouchedTab(tabId, prev);
+  if (autoEnabledState === null) return false;
+  await attachOrToggleGraph(tabId, autoEnabledState.params, true);
+  await saveTabState(tabId, autoEnabledState);
+  return true;
 };
 
 // SET_ENABLED / UPDATE_PARAMS が "no graph" で失敗した場合のみ cache 不整合を解消する。
@@ -357,15 +400,22 @@ chrome.runtime.onMessage.addListener((raw, _sender, sendResponse) => {
           case 'ENABLE_TAB': {
             // attach が成功してから storage を更新する (失敗時に UI=ON / 圧縮なし
             // の不整合を起こさないため)。
+            // MONITOR_TAB の自動有効化が attach している間も popup の ON ボタンは押せるため、
+            // ENABLE_TAB がロック待ちの後に届くことがある。そのとき raw.params は popup が
+            // 持つ古い既定値なので、既に ON になっている TabState の presetId と組み合わせると
+            // presetId と params が食い違う。既に ON なら保存済みの params を使う。
             const prev = await loadTabState(raw.tabId);
-            await attachOrToggleGraph(raw.tabId, raw.params, true);
+            const params =
+              prev?.enabled === true ? normalizeCompressorParams(prev.params) : raw.params;
+            await attachOrToggleGraph(raw.tabId, params, true);
             const next: TabState = {
               enabled: true,
               presetId: prev?.presetId ?? DEFAULT_PRESET_ID,
-              params: raw.params,
+              params,
             };
             await saveTabState(raw.tabId, next);
             clearAutoOffBadge(raw.tabId);
+            await unmarkTabManuallyDisabled(raw.tabId);
             return { ok: true };
           }
           case 'DISABLE_TAB': {
@@ -374,7 +424,7 @@ chrome.runtime.onMessage.addListener((raw, _sender, sendResponse) => {
             // graph は圧縮中」となり、その後の popup クローズで stopMonitoringIfBypass が
             // enabled な graph を残したまま cache だけ消す orphan 経路になる。
             const prev = await loadTabState(raw.tabId);
-            const params = prev?.params ?? DEFAULT_PARAMS;
+            const params = prev?.params ?? DEFAULT_PRESET.params;
             if (await isMonitoredTab(raw.tabId)) {
               await sendOrCleanupOnMissingGraph(raw.tabId, {
                 type: 'SET_ENABLED',
@@ -390,6 +440,8 @@ chrome.runtime.onMessage.addListener((raw, _sender, sendResponse) => {
             if (latest !== undefined) {
               await saveTabState(raw.tabId, { ...latest, enabled: false });
             }
+            // 拡張の更新・再読み込みで TabState が消えた後も、このタブを自動有効化の対象外にする。
+            await markTabManuallyDisabled(raw.tabId);
             return { ok: true };
           }
           case 'UPDATE_PARAMS': {
@@ -410,16 +462,25 @@ chrome.runtime.onMessage.addListener((raw, _sender, sendResponse) => {
           }
           case 'MONITOR_TAB': {
             const prev = await loadTabState(raw.tabId);
+            // popup を開いた = auto-OFF に気づける状態なのでバッジは役目を終える。
+            // attach の成否に依存させないため先にクリアする。
+            clearAutoOffBadge(raw.tabId);
+            // 一度も操作していないタブは、自動有効化設定が ON なら指定プリセットで ON にする。
+            if (await applyAutoEnableIfUntouched(raw.tabId, prev)) return { ok: true };
             const params = normalizeCompressorParams(prev?.params ?? raw.params);
             const enabled = prev?.enabled === true;
             // attachOrToggleGraph は「graph があれば SET_ENABLED で再確認 → missing なら
             // cache を破棄して新規 attach」というセルフヒーリングを持つ。
-            // popup を開いた = auto-OFF に気づける状態なのでバッジは役目を終える。
-            // attach の成否に依存させないため先にクリアする。
-            clearAutoOffBadge(raw.tabId);
             // GRAPH_LOST 通知が popup 側より遅れて届くケース (Offscreen → popup → SW の経路で
             // MONITOR_TAB が先に SW へ届く) でも、ここで死んだ graph を検出して再キャプチャできる。
             await attachOrToggleGraph(raw.tabId, params, enabled);
+            return { ok: true };
+          }
+          case 'APPLY_AUTO_ENABLE': {
+            // popup で自動有効化設定を ON にした直後に届く。popup を開いた時点 (MONITOR_TAB) では
+            // まだ設定が OFF だったタブも、未操作ならここで ON にする。
+            const prev = await loadTabState(raw.tabId);
+            await applyAutoEnableIfUntouched(raw.tabId, prev);
             return { ok: true };
           }
           case 'STOP_MONITOR': {
@@ -445,6 +506,7 @@ chrome.runtime.onMessage.addListener((raw, _sender, sendResponse) => {
 chrome.tabs.onRemoved.addListener((tabId) => {
   void withTabLock(tabId, async () => {
     await chrome.storage.session.remove(tabStorageKey(tabId));
+    await unmarkTabManuallyDisabled(tabId);
     await removeMonitoredTab(tabId);
     await bestEffortDestroyGraph(tabId);
   });
@@ -453,6 +515,9 @@ chrome.tabs.onRemoved.addListener((tabId) => {
 chrome.runtime.onStartup.addListener(() => {
   void (async () => {
     await chrome.storage.session.clear();
+    // タブ ID の一意性はブラウザセッション内でしか保証されないため、前回のセッションの
+    // 手動 OFF の記録は捨てる。
+    await clearManuallyDisabledTabs();
     await resetMonitoredTabs();
   })();
 });

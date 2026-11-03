@@ -19,7 +19,9 @@ export const PARAM_RANGES = {
   { min: number; max: number; step: number; unit: string }
 >;
 
-export const DEFAULT_PARAMS: CompressorParams = {
+// 保存データにフィールドが欠けていた場合の補完値。
+// manualMakeupGainDb は 0 dB (音量を変えない) で補う。
+export const FALLBACK_PARAMS: CompressorParams = {
   threshold: -20,
   knee: 30,
   ratio: 6,
@@ -37,15 +39,15 @@ export const PARAM_LABELS: Record<keyof CompressorParams, string> = {
   manualMakeupGainDb: 'Makeup',
 };
 
-// 旧バージョン保存データや外部入力に manualMakeupGainDb が欠けていても
-// 0 dB として扱えるよう補完する。dbToLinear に undefined が渡るのを防ぐ。
+// 保存データや外部入力に欠けているフィールドを FALLBACK_PARAMS の値で補う。
+// dbToLinear に undefined が渡るのを防ぐ。
 export const normalizeCompressorParams = (
   raw: Partial<CompressorParams> | null | undefined,
 ): CompressorParams => ({
-  threshold: raw?.threshold ?? DEFAULT_PARAMS.threshold,
-  knee: raw?.knee ?? DEFAULT_PARAMS.knee,
-  ratio: raw?.ratio ?? DEFAULT_PARAMS.ratio,
-  attackMs: raw?.attackMs ?? DEFAULT_PARAMS.attackMs,
-  releaseMs: raw?.releaseMs ?? DEFAULT_PARAMS.releaseMs,
-  manualMakeupGainDb: raw?.manualMakeupGainDb ?? DEFAULT_PARAMS.manualMakeupGainDb,
+  threshold: raw?.threshold ?? FALLBACK_PARAMS.threshold,
+  knee: raw?.knee ?? FALLBACK_PARAMS.knee,
+  ratio: raw?.ratio ?? FALLBACK_PARAMS.ratio,
+  attackMs: raw?.attackMs ?? FALLBACK_PARAMS.attackMs,
+  releaseMs: raw?.releaseMs ?? FALLBACK_PARAMS.releaseMs,
+  manualMakeupGainDb: raw?.manualMakeupGainDb ?? FALLBACK_PARAMS.manualMakeupGainDb,
 });

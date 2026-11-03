@@ -1,4 +1,5 @@
 import { useCallback } from 'react';
+import type { AutoEnableSettings } from '@/shared/auto-enable-settings';
 import type { CompressorParams } from '@/shared/compressor-params';
 import { findPreset, type PresetId } from '@/shared/presets';
 import type { UserPreset, UserPresetId } from '@/shared/user-presets';
@@ -7,18 +8,25 @@ import { useTabState } from './hooks/useTabState';
 import { useMeterStream } from './hooks/useMeterStream';
 import { useMonitorTab } from './hooks/useMonitorTab';
 import { useUserPresets } from './hooks/useUserPresets';
+import { useAutoEnableSettings } from './hooks/useAutoEnableSettings';
 import { PowerToggle } from './components/PowerToggle';
 import { PresetSelector } from './components/PresetSelector';
 import { UserPresetList } from './components/UserPresetList';
 import { ParameterPanel } from './components/ParameterPanel';
 import { LevelMeters } from './components/LevelMeters';
 import { CompressorCurveChart } from './components/CompressorCurveChart';
+import { AutoEnableSettingsPanel } from './components/AutoEnableSettingsPanel';
 
 export const App = () => {
   const tabId = useCurrentTabId();
-  const { state, isReady, enable, disable, setState } = useTabState(tabId);
+  const { state, isReady, enable, disable, applyAutoEnable, setState } = useTabState(tabId);
   const meters = useMeterStream(tabId);
   const userPresets = useUserPresets();
+  const {
+    settings: autoEnableSettings,
+    isReady: isAutoEnableReady,
+    update: updateAutoEnableSettings,
+  } = useAutoEnableSettings();
   useMonitorTab(tabId, state.params);
 
   const handleToggle = useCallback(() => {
@@ -75,6 +83,19 @@ export const App = () => {
       });
     },
     [state, setState, userPresets],
+  );
+
+  // 設定を ON にしたときは、いま popup を開いているタブにもその場で適用する
+  // (popup を開いた時点の自動判定は、まだ設定が OFF だったため何もしていない)。
+  // SW は storage の設定を読んで判定するので、保存が終わってから依頼する。
+  const handleAutoEnableChange = useCallback(
+    (next: AutoEnableSettings) => {
+      const turnedOn = next.enabled && !autoEnableSettings.enabled;
+      void updateAutoEnableSettings(next).then(() => {
+        if (turnedOn) void applyAutoEnable();
+      });
+    },
+    [autoEnableSettings.enabled, updateAutoEnableSettings, applyAutoEnable],
   );
 
   const controlsDisabled = !state.enabled;
@@ -138,6 +159,17 @@ export const App = () => {
               params={state.params}
               disabled={controlsDisabled}
               onChange={handleParamsChange}
+            />
+          </section>
+
+          {/* 全タブ共通の設定でタブの ON / OFF とは無関係なので、controlsDisabled では無効化しない */}
+          <section className="section">
+            <span className="section__heading">Auto Enable</span>
+            <AutoEnableSettingsPanel
+              settings={autoEnableSettings}
+              userPresets={userPresets.presets}
+              isReady={isAutoEnableReady && userPresets.isReady}
+              onChange={handleAutoEnableChange}
             />
           </section>
         </div>

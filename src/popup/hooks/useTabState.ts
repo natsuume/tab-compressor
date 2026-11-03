@@ -1,13 +1,13 @@
 import { useCallback, useEffect, useState } from 'react';
 import type { Msg } from '@/shared/messages';
-import { DEFAULT_PARAMS, normalizeCompressorParams } from '@/shared/compressor-params';
-import { DEFAULT_PRESET_ID } from '@/shared/presets';
+import { normalizeCompressorParams } from '@/shared/compressor-params';
+import { DEFAULT_PRESET, DEFAULT_PRESET_ID } from '@/shared/presets';
 import { tabStorageKey, type TabState } from '@/shared/tab-state';
 
 const createDefaultState = (): TabState => ({
   enabled: false,
   presetId: DEFAULT_PRESET_ID,
-  params: DEFAULT_PARAMS,
+  params: DEFAULT_PRESET.params,
 });
 
 const normalizeTabState = (raw: TabState | undefined): TabState => {
@@ -27,6 +27,8 @@ export type UseTabStateResult = {
   isReady: boolean;
   enable: () => Promise<void>;
   disable: () => Promise<void>;
+  // 未操作のタブなら、自動有効化設定に従って ON にするよう SW に依頼する
+  applyAutoEnable: () => Promise<void>;
   setState: (next: TabState) => Promise<void>;
 };
 
@@ -79,6 +81,11 @@ export const useTabState = (tabId: number | null): UseTabStateResult => {
     await sendMessage({ type: 'DISABLE_TAB', tabId });
   }, [tabId]);
 
+  const applyAutoEnable = useCallback(async () => {
+    if (tabId === null) return;
+    await sendMessage({ type: 'APPLY_AUTO_ENABLE', tabId });
+  }, [tabId]);
+
   const setState = useCallback(
     async (next: TabState) => {
       if (tabId === null) return;
@@ -98,5 +105,5 @@ export const useTabState = (tabId: number | null): UseTabStateResult => {
     [tabId],
   );
 
-  return { state, isReady, enable, disable, setState };
+  return { state, isReady, enable, disable, applyAutoEnable, setState };
 };

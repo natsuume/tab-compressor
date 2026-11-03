@@ -160,9 +160,10 @@ h3 {
   color: var(--color-text-faint);
 }
 
+/* auto-fit で空の列を畳み、プリセットが 1 つでも横幅いっぱいに表示する。 */
 .preset-selector {
   display: grid;
-  grid-template-columns: repeat(2, 1fr);
+  grid-template-columns: repeat(auto-fit, minmax(120px, 1fr));
   gap: 6px;
 }
 
@@ -308,6 +309,58 @@ h3 {
 }
 
 .parameter-slider input[type='range']:disabled {
+  cursor: not-allowed;
+}
+
+.auto-enable-panel {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.auto-enable-panel__toggle {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 12px;
+  cursor: pointer;
+}
+
+.auto-enable-panel__toggle input {
+  margin: 0;
+  accent-color: var(--color-accent);
+}
+
+/* ラベル列の 72px は .parameter-slider のラベル列と揃える。 */
+.auto-enable-panel__preset {
+  display: grid;
+  grid-template-columns: 72px minmax(0, 1fr);
+  align-items: center;
+  gap: 8px;
+}
+
+.auto-enable-panel__label {
+  font-size: 12px;
+  color: var(--color-text-mute);
+}
+
+.auto-enable-panel__select {
+  width: 100%;
+  min-width: 0;
+  border: 1px solid var(--color-border);
+  background: var(--color-surface-alt);
+  color: var(--color-text);
+  padding: 4px 6px;
+  border-radius: 4px;
+  font-size: 12px;
+}
+
+.auto-enable-panel__select[aria-invalid='true'] {
+  border-color: var(--color-warn);
+}
+
+.auto-enable-panel__select:disabled {
+  opacity: 0.45;
   cursor: not-allowed;
 }
 
