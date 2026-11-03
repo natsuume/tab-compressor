@@ -12,6 +12,8 @@ import {
   type CompressorParams,
 } from '@/shared/compressor-params';
 import { DEFAULT_PRESET_ID } from '@/shared/presets';
+import { loadUserPresets } from '@/shared/user-presets';
+import { decideAutoEnableState, loadAutoEnableSettings } from '@/shared/auto-enable-settings';
 import { ensureOffscreenDocument } from './offscreen-manager';
 import { getTabMediaStreamId } from './capture-stream';
 
@@ -152,6 +154,21 @@ const loadTabState = async (tabId: number): Promise<TabState | undefined> => {
 
 const saveTabState = async (tabId: number, state: TabState): Promise<void> => {
   await chrome.storage.session.set({ [tabStorageKey(tabId)]: state });
+};
+
+// MONITOR_TAB 受信時に、自動有効化設定に従って ON にすべきかを判断する。
+// ON にする場合は保存すべき TabState、しない場合は null を返す。
+// TabState があるタブ (一度でも操作したタブ) は判定するまでもなく対象外なので、
+// 設定と My Presets の読み込みを省く。
+const loadAutoEnableStateForUntouchedTab = async (
+  prev: TabState | undefined,
+): Promise<TabState | null> => {
+  if (prev !== undefined) return null;
+  const [settings, userPresets] = await Promise.all([
+    loadAutoEnableSettings(),
+    loadUserPresets(),
+  ]);
+  return decideAutoEnableState(prev, settings, userPresets);
 };
 
 // 既存グラフがあれば経路切替のみ、なければタブキャプチャから構築。
@@ -410,13 +427,22 @@ chrome.runtime.onMessage.addListener((raw, _sender, sendResponse) => {
           }
           case 'MONITOR_TAB': {
             const prev = await loadTabState(raw.tabId);
+            // popup を開いた = auto-OFF に気づける状態なのでバッジは役目を終える。
+            // attach の成否に依存させないため先にクリアする。
+            clearAutoOffBadge(raw.tabId);
+            // 一度も操作していないタブは、自動有効化設定が ON なら指定プリセットで ON にする。
+            // popup を開いた時点で activeTab が付与されているので、ここで tabCapture できる。
+            // ENABLE_TAB と同じく attach が成功してから storage を更新する。
+            const autoEnabledState = await loadAutoEnableStateForUntouchedTab(prev);
+            if (autoEnabledState !== null) {
+              await attachOrToggleGraph(raw.tabId, autoEnabledState.params, true);
+              await saveTabState(raw.tabId, autoEnabledState);
+              return { ok: true };
+            }
             const params = normalizeCompressorParams(prev?.params ?? raw.params);
             const enabled = prev?.enabled === true;
             // attachOrToggleGraph は「graph があれば SET_ENABLED で再確認 → missing なら
             // cache を破棄して新規 attach」というセルフヒーリングを持つ。
-            // popup を開いた = auto-OFF に気づける状態なのでバッジは役目を終える。
-            // attach の成否に依存させないため先にクリアする。
-            clearAutoOffBadge(raw.tabId);
             // GRAPH_LOST 通知が popup 側より遅れて届くケース (Offscreen → popup → SW の経路で
             // MONITOR_TAB が先に SW へ届く) でも、ここで死んだ graph を検出して再キャプチャできる。
             await attachOrToggleGraph(raw.tabId, params, enabled);
